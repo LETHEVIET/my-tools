@@ -1,6 +1,8 @@
 # My Tools — minimal Rust Windows background agent
 
-**Snap to Paste Image** is the first utility in **My Tools**. The same small **My Tools — Background Agent** also hosts **Prompt Notes**, an always-ready Windows scratchpad invoked with **Ctrl+Alt+P**. See [MY_TOOLS.md](MY_TOOLS.md) for the GPUI Kit native desktop hub (using the default theme), the notes workflow, app naming, and updated folder structure. The tray receiver and image transfer flow remain independent of the desktop hub.
+**v0.4.0 and newer:** the background receiver is built into the single **`my-tools.exe`** desktop application. Use `build_hub_windows.bat` to build, `start_hub_windows.bat` to show the dashboard, or `start_windows.bat` to start hidden in the tray. The standalone `rust/` Cargo crate is for development tests only and is not packaged. The historical instructions below may reference the earlier separate agent executable.
+
+**Snap to Paste Image** is the first utility in **My Tools**. The single process also hosts **Prompt Notes**, invoked with **Ctrl+Alt+P**. See [MY_TOOLS.md](MY_TOOLS.md) for the GPUI Kit hub, the notes workflow and the one-EXE architecture.
 
 The default Windows implementation is now a **native Rust executable**. The iPhone page is unchanged, and ships embedded in the binary. No Python, Node.js, Electron, or separate web server is required to run the finished app.
 
@@ -8,13 +10,13 @@ The default Windows implementation is now a **native Rust executable**. The iPho
 
 On Windows, install Rust using [rustup](https://rustup.rs/) with the MSVC toolchain, then:
 
-1. Double-click `build_windows.bat` once. It builds `rust\target\release\my-tools-agent.exe`.
-2. Double-click `start_windows.bat` to start the receiver silently in the notification area (system tray).
+1. Double-click `build_windows.bat` once. It builds **`desktop\target\release\my-tools.exe`**.
+2. Double-click `start_windows.bat` to start My Tools hidden in the notification area, or `start_hub_windows.bat` to open the dashboard.
 3. On first launch, your browser opens the pairing QR page. On later launches, **double-click the tray icon** or right-click it and choose **Show pairing QR**.
 4. Scan the QR with your iPhone Camera app, open the link in Safari, and bookmark it for future snaps.
 5. Focus the AI prompt on your Windows PC. **Library** lets you select one or more photos, which paste to the PC in order. On the usual local HTTP link, the round shutter opens the iPhone's native camera picker; confirm **Use Photo** to paste. It does **not** submit your AI prompt.
 
-**Updating an already-running agent:** only one process can use port 8765, and Windows won't overwrite a running executable. Double-click `upgrade_windows.bat`, exit the old **Snap to Prompt** or **My Tools** tray process, then continue through the update prompt. This rebuilds the new `my-tools-agent.exe`. Reload Safari after upgrading.
+**Updating an already-running app:** only one process can use port 8765, and Windows won't overwrite a running executable. Double-click `upgrade_windows.bat`, exit the old **Snap to Prompt** or **My Tools** tray process, then continue through the update prompt. This rebuilds the new `my-tools.exe`. Reload Safari after upgrading.
 
 ## In-app camera preview (no switching to the iPhone Camera app)
 

@@ -1,12 +1,15 @@
 //! Minimal Win32 tray, startup preference, CF_DIB clipboard, and SendInput.
 use std::mem::{size_of, zeroed};
 use std::ptr::{null, null_mut};
+use std::sync::atomic::AtomicBool;
 use std::sync::atomic::{AtomicIsize, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use image::DynamicImage;
-use windows_sys::Win32::Foundation::{GlobalFree, HWND, LPARAM, LRESULT, POINT, WPARAM};
+use windows_sys::Win32::Foundation::{
+    GetLastError, GlobalFree, ERROR_ALREADY_EXISTS, HWND, LPARAM, LRESULT, POINT, WPARAM,
+};
 use windows_sys::Win32::System::DataExchange::{
     CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData,
 };
@@ -15,6 +18,7 @@ use windows_sys::Win32::System::Ole::CF_DIB;
 use windows_sys::Win32::System::Registry::{
     RegDeleteKeyValueW, RegGetValueW, RegSetKeyValueW, HKEY_CURRENT_USER, REG_SZ, RRF_RT_REG_SZ,
 };
+use windows_sys::Win32::System::Threading::CreateMutexW;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     RegisterHotKey, SendInput, UnregisterHotKey, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT,
     KEYEVENTF_KEYUP, MOD_ALT, MOD_CONTROL, MOD_NOREPEAT, VK_CONTROL,
@@ -25,11 +29,12 @@ use windows_sys::Win32::UI::Shell::{
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyWindow,
-    DispatchMessageW, GetCursorPos, GetForegroundWindow, GetMessageW, LoadIconW, MessageBoxW,
-    PostQuitMessage, RegisterClassW, SetForegroundWindow, TrackPopupMenu, TranslateMessage,
-    IDI_APPLICATION, MB_ICONERROR, MB_OK, MF_CHECKED, MF_SEPARATOR, MF_STRING, MSG, SW_SHOWNORMAL,
-    TPM_RIGHTBUTTON, WM_APP, WM_CLOSE, WM_COMMAND, WM_DESTROY, WM_HOTKEY, WM_LBUTTONDBLCLK,
-    WM_RBUTTONUP, WM_USER, WNDCLASSW,
+    DispatchMessageW, FindWindowW, GetCursorPos, GetForegroundWindow, GetMessageW, LoadIconW,
+    MessageBoxW, PostMessageW, PostQuitMessage, RegisterClassW, SetForegroundWindow, ShowWindow,
+    TrackPopupMenu, TranslateMessage, IDI_APPLICATION, MB_ICONERROR, MB_ICONINFORMATION, MB_OK,
+    MF_CHECKED, MF_SEPARATOR, MF_STRING, MSG, SW_HIDE, SW_RESTORE, SW_SHOWNORMAL, TPM_RIGHTBUTTON,
+    WM_APP, WM_CLOSE, WM_COMMAND, WM_DESTROY, WM_HOTKEY, WM_LBUTTONDBLCLK, WM_RBUTTONUP, WM_USER,
+    WNDCLASSW,
 };
 
 use crate::notes;
@@ -38,6 +43,7 @@ use crate::update;
 
 const TRAY_CALLBACK: u32 = WM_USER + 29;
 const SHOW: usize = 1001;
+const SHOW_HUB: usize = 1009;
 const TOGGLE: usize = 1002;
 const ROTATE: usize = 1003;
 const AUTOSTART: usize = 1004;
@@ -47,6 +53,7 @@ const CHECK_UPDATES: usize = 1007;
 const AUTO_UPDATES: usize = 1008;
 const NOTES_HOTKEY_ID: i32 = 771;
 pub const WM_OPEN_NOTES: u32 = WM_APP + 42;
+const WM_APP_EXIT: u32 = WM_APP + 43;
 const RUN_PATH: &str = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
 const RUN_NAME: &str = "MyTools";
 const LEGACY_RUN_NAME: &str = "SnapToPrompt";
@@ -54,6 +61,70 @@ const LEGACY_RUN_NAME: &str = "SnapToPrompt";
 static STATE: OnceLock<Arc<State>> = OnceLock::new();
 static PORT: OnceLock<u16> = OnceLock::new();
 static WINDOW: AtomicIsize = AtomicIsize::new(0);
+static INSTANCE: AtomicIsize = AtomicIsize::new(0);
+static EXITING: AtomicBool = AtomicBool::new(false);
+
+pub fn exiting() -> bool {
+    EXITING.load(Ordering::Relaxed)
+}
+
+pub fn another_instance_running() -> bool {
+    unsafe {
+        let handle = CreateMutexW(null(), 0, wide("Local\\MyToolsSingleInstance").as_ptr());
+        if handle.is_null() {
+            return false;
+        }
+        if GetLastError() == ERROR_ALREADY_EXISTS {
+            return true;
+        }
+        INSTANCE.store(handle as isize, Ordering::Relaxed);
+        false
+    }
+}
+
+fn hub_window() -> HWND {
+    unsafe { FindWindowW(null(), wide("My Tools").as_ptr()) }
+}
+
+pub fn show_hub() {
+    unsafe {
+        let hwnd = hub_window();
+        if !hwnd.is_null() {
+            ShowWindow(hwnd, SW_RESTORE);
+            SetForegroundWindow(hwnd);
+        }
+    }
+}
+
+pub fn hide_hub() {
+    unsafe {
+        let hwnd = hub_window();
+        if !hwnd.is_null() {
+            ShowWindow(hwnd, SW_HIDE);
+        }
+    }
+}
+
+pub fn info_dialog(message: &str) {
+    unsafe {
+        MessageBoxW(
+            null_mut(),
+            wide(message).as_ptr(),
+            wide("My Tools").as_ptr(),
+            MB_ICONINFORMATION | MB_OK,
+        );
+    }
+}
+
+fn quit_entire_app() {
+    EXITING.store(true, Ordering::Relaxed);
+    unsafe {
+        let hwnd = hub_window();
+        if !hwnd.is_null() {
+            PostMessageW(hwnd, WM_CLOSE, 0, 0);
+        }
+    }
+}
 
 fn wide(value: &str) -> Vec<u16> {
     value.encode_utf16().chain(Some(0)).collect()
@@ -72,7 +143,7 @@ pub fn error_dialog(message: &str) {
 
 fn startup_cmd() -> String {
     format!(
-        "\"{}\"",
+        "\"{}\" --minimized",
         std::env::current_exe().unwrap_or_default().display()
     )
 }
@@ -198,6 +269,7 @@ fn menu(hwnd: HWND) {
         if menu.is_null() {
             return;
         }
+        AppendMenuW(menu, MF_STRING, SHOW_HUB, wide("Open My Tools").as_ptr());
         AppendMenuW(menu, MF_STRING, SHOW, wide("Show pairing QR").as_ptr());
         if let Some(state) = STATE.get() {
             AppendMenuW(
@@ -257,7 +329,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         TRAY_CALLBACK => {
             match lparam as u32 {
                 WM_RBUTTONUP => menu(hwnd),
-                WM_LBUTTONDBLCLK => show_pairing(),
+                WM_LBUTTONDBLCLK => show_hub(),
                 _ => {}
             }
             0
@@ -270,8 +342,14 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             notes::show(hwnd, false);
             0
         }
+        WM_APP_EXIT => {
+            notes::shutdown();
+            quit_entire_app();
+            0
+        }
         WM_COMMAND => {
             match wparam & 0xFFFF {
+                SHOW_HUB => show_hub(),
                 SHOW => show_pairing(),
                 OPEN_NOTES => notes::show(hwnd, false),
                 CHECK_UPDATES => {
@@ -305,6 +383,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                     }
                 }
                 EXIT => {
+                    quit_entire_app();
                     DestroyWindow(hwnd);
                 }
                 _ => {}

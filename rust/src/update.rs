@@ -31,10 +31,9 @@ pub fn installed() -> bool {
     current.parent().is_some_and(|p| {
         p.to_string_lossy()
             .eq_ignore_ascii_case(&destination.to_string_lossy())
-    }) && current.file_name().is_some_and(|name| {
-        name.to_string_lossy()
-            .eq_ignore_ascii_case("my-tools-agent.exe")
-    })
+    }) && current
+        .file_name()
+        .is_some_and(|name| name.to_string_lossy().eq_ignore_ascii_case("my-tools.exe"))
 }
 
 fn auto_pref_file() -> Result<PathBuf, String> {
@@ -70,7 +69,7 @@ fn updater_file() -> Result<PathBuf, String> {
 
 pub fn check_now(interactive: bool) -> Result<(), String> {
     if !installed() {
-        return Err("Automatic updates require an installed My Tools release. Download a release ZIP from GitHub and run install-my-tools.ps1 first.".into());
+        return Err("Automatic updates require an installed My Tools release. Open the downloaded my-tools.exe and choose Install My Tools first.".into());
     }
     let ps = updater_file()?;
     let dir = installation_dir()?;

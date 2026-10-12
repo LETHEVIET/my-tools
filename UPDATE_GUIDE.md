@@ -1,45 +1,47 @@
-# My Tools — CI/CD and GitHub auto-updates
+# My Tools — single EXE and GitHub updates
 
-The source repository is **private**: https://github.com/LETHEVIET/my-tools. Pushing the main branch runs Windows CI (Rust formatting, both native builds, Rust tests, and HTTP integration tests). Pushing a version tag such as **v0.3.0** publishes a Windows GitHub Release:
+**Release download:** `my-tools.exe` from the private [GitHub Releases page](https://github.com/LETHEVIET/my-tools/releases). The companion `SHA256SUMS.txt` is a verification file, **not another app**. There is no installer `.ps1` in the release.
 
-- **MyTools-windows-x64.zip** — GPUI desktop hub, Rust background agent, installer script and documentation.
-- **SHA256SUMS.txt** — SHA-256 checksum checked by the updater before installing.
+## Open, hide, and quit
 
-The release tag must match the versions in both Cargo.toml manifests. GitHub Actions uses an ephemeral GITHUB_TOKEN to upload releases; no GitHub credentials are checked into source.
+1. Double-click `my-tools.exe` to open the **My Tools** desktop hub. It includes the photo-transfer receiver and Prompt Notes in the **same Windows process**.
+2. Click the **X** to hide My Tools to the Windows notification area (system tray). iPhone photo pasting and **Ctrl+Alt+P** Prompt Notes remain available.
+3. Double-click the tray icon or right-click and select **Open My Tools** to show the hub again. Running `my-tools.exe` a second time also brings back the existing hub instead of starting another copy.
+4. Right-click the tray icon and choose **Exit My Tools** to quit completely.
 
-## Install once
+## Optional one-click installation
 
-1. From the private repository's Releases page, download and extract the latest Windows ZIP.
-2. In PowerShell, inside the extracted directory, run: powershell -ExecutionPolicy Bypass -File .\install-my-tools.ps1
-3. The script installs both EXEs into %LOCALAPPDATA%\Programs\MyTools, creates a Start Menu shortcut, and enables the lightweight agent at Windows login. No administrator privileges or Rust installation are required.
-4. Install the GitHub CLI if necessary (winget install GitHub.cli) and sign in with **gh auth login** on this Windows account. The GitHub identity must have access to the **private** repository for the updater to work.
+Run the downloaded EXE, then choose **Install My Tools for startup and automatic updates** in the hub. The app copies **one** file to `%LOCALAPPDATA%\Programs\MyTools\my-tools.exe` and registers itself to start **hidden to tray** after Windows login. Restart using this installed copy for future automatic updates. No administrator permissions or external installer script are required.
 
-Developer builds launched using start_windows.bat or start_hub_windows.bat are deliberately **not** auto-updated: only installations under %LOCALAPPDATA%\Programs\MyTools are updated. This avoids overwriting development builds.
+**Upgrading from v0.3.0 (the old two-EXE release):** exit both the old My Tools desktop window and its old tray agent first, then download `my-tools.exe` v0.4.0 and click **Install My Tools** in the new dashboard. This is a **one-time manual upgrade** because the v0.3.0 updater expects the old ZIP package format. Subsequent single-EXE releases can update automatically. Existing pairing and Prompt Notes files are preserved; the installer removes the obsolete `my-tools-agent.exe` from the installation folder when Windows permits it.
 
-## How auto-updating works
+For the private repository, install and authenticate [GitHub CLI](https://cli.github.com/) on that Windows user account using `gh auth login`. The CLI is called only during update checks, and its credentials remain in the Windows credential store.
 
-- The installed tray agent checks GitHub Releases on startup and roughly every six hours, using a short-lived PowerShell and gh subprocess. Neither process stays resident.
-- The tray menu includes **Automatic updates** (enabled by default on an installed app) and **Check for updates**.
-- When a newer release is available, the updater downloads the release ZIP and checksum from GitHub, validates SHA-256, and confirms the expected executables are present.
-- If the GPUI desktop hub is open, installation is **deferred** to avoid closing active work. Close the hub when convenient, and the next check can proceed.
-- The updater requests that the tray agent close gracefully so Prompt Notes can save its draft. It then replaces both executables, retains backups during the copy operation, and restarts the agent. Pairing and note files in %LOCALAPPDATA%\MyTools are unaffected.
-- Update diagnostics are written to %LOCALAPPDATA%\MyTools\update.log.
-- Private-repository updates require an authenticated gh installation. If credentials expire, the background check will log the problem rather than interrupting your work.
+## Automatic updates
 
-The update script itself is embedded in the compiled agent; the newly downloaded ZIP is not allowed to provide a script that runs automatically. ZIP integrity is verified against the checksum published in the matching GitHub release. **Executables are not yet Authenticode-signed.** Before distributing this beyond your own GitHub account, add Windows code signing and signature verification for more robust publisher authentication.
+The installed program checks for new GitHub Releases on startup and approximately every six hours. **Check for updates** and **Automatic updates** are available from the tray menu. The update helper is stored inside the EXE and extracted temporarily when checking; it is not distributed as a separate app. When a newer release appears:
 
-## Publish the next version
+- Download the new `my-tools.exe` plus `SHA256SUMS.txt` using the authenticated GitHub CLI.
+- Verify the downloaded executable's SHA-256 value against the release metadata.
+- **Defer the upgrade while the desktop hub is visible**, avoiding interruptions. Once it's hidden, a future check can install the release.
+- Save the Prompt Notes draft, gracefully shut down the one process, back up the old EXE, replace it, and restart with `--minimized`. Pairing settings and prompt notes in `%LOCALAPPDATA%\MyTools` are untouched.
 
-When ready, bump the version in both Cargo.toml files, commit and push main, then create and push an annotated version tag:
+Diagnostic log: `%LOCALAPPDATA%\MyTools\update.log`.
 
-    git add .
-    git commit -m "Release v0.3.1"
-    git push origin main
-    git tag -a v0.3.1 -m "My Tools v0.3.1"
-    git push origin v0.3.1
+The GitHub account must retain access to the private repository for updates. The binaries are **not Authenticode-signed yet**, so distribute only to trusted users until publisher signatures are available.
 
-The **Publish Windows Release** action builds, tests, and uploads the tagged version. My Tools picks it up on a future check. The first published version is **v0.3.0**, so the first update after that must be a higher version such as **v0.3.1**.
+## CI/CD
 
-## Compatibility and privacy
+Pushing to `main` runs the Windows build and tests. Pushing a new `vMAJOR.MINOR.PATCH` tag triggers the Windows Release workflow. Both `desktop/Cargo.toml` and `rust/Cargo.toml` must match the tag version. The workflow publishes **one EXE**, plus its SHA-256 checksum.
 
-Windows x64 only. Private GitHub Releases are not anonymously downloadable. The agent reads update assets through your own GitHub CLI account; it does not store a GitHub token in its configuration. Photo pairing and prompt data remain local, except for the optional HTTPS photo tunnel described in RUST_SETUP.md. The update mechanism does not transmit them to GitHub.
+For example, after editing the code and bumping both manifest versions to `0.4.1`:
+
+```powershell
+git add -A
+git commit -m "Release v0.4.1"
+git push origin main
+git tag -a v0.4.1 -m "My Tools v0.4.1"
+git push origin v0.4.1
+```
+
+Developer builds (`build_windows.bat`, `start_windows.bat`, `start_hub_windows.bat`) are not automatically replaced during updates. All feature behavior is inside the `desktop/target/release/my-tools.exe` binary, even though the repository keeps a small `rust/` crate for testing native helper logic.

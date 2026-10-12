@@ -15,7 +15,7 @@ from urllib.request import Request, urlopen
 
 
 BIN = Path(os.environ.get("MY_TOOLS_AGENT_BIN") or
-           (Path(__file__).resolve().parents[1] / "rust" / "target" / "release" / "my-tools-agent.exe"))
+           (Path(__file__).resolve().parents[1] / "desktop" / "target" / "release" / "my-tools.exe"))
 
 
 @unittest.skipUnless(os.name == "nt" and BIN.exists(), "Requires built Windows Rust executable")
@@ -34,7 +34,7 @@ class RustReceiverTests(unittest.TestCase):
                 s.bind(("127.0.0.1", 0))
                 port = s.getsockname()[1]
             env = dict(os.environ, LOCALAPPDATA=directory)
-            process = subprocess.Popen([str(BIN), "--host", "127.0.0.1", "--port", str(port)], env=env)
+            process = subprocess.Popen([str(BIN), "--headless-test", "--host", "127.0.0.1", "--port", str(port)], env=env)
 
             def request(path, token=None, data=None):
                 headers = {"Authorization": f"Bearer {token}"} if token is not None else {}

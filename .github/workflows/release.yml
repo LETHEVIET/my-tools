@@ -22,7 +22,7 @@ jobs:
       - name: Verify tag matches both applications
         shell: pwsh
         run: |
-          if ($env:GITHUB_REF_TYPE -ne 'tag') { throw 'Publish only from a version tag such as v0.3.0.' }
+          if ($env:GITHUB_REF_TYPE -ne 'tag') { throw 'Publish only from a version tag such as v0.4.0.' }
           $expected = $env:GITHUB_REF_NAME.TrimStart('v')
           foreach ($path in @('rust/Cargo.toml', 'desktop/Cargo.toml')) {
             $found = Select-String -Path $path -Pattern '^version = "([^"]+)"' | Select-Object -First 1
@@ -37,25 +37,19 @@ jobs:
           cargo fmt --check --manifest-path rust/Cargo.toml
           cargo fmt --check --manifest-path desktop/Cargo.toml
           cargo test --locked --manifest-path rust/Cargo.toml
-          cargo build --release --locked --manifest-path rust/Cargo.toml
           cargo build --release --locked --manifest-path desktop/Cargo.toml
           python -m pip install -r requirements.txt
-          $env:MY_TOOLS_AGENT_BIN = (Resolve-Path rust/target/release/my-tools-agent.exe).Path
+          $env:MY_TOOLS_AGENT_BIN = (Resolve-Path desktop/target/release/my-tools.exe).Path
           python -m unittest discover -s tests -v
-      - name: Package portable Windows release
+      - name: Package single executable and checksum
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Path release-files -Force | Out-Null
           New-Item -ItemType Directory -Path release-dist -Force | Out-Null
-          Copy-Item rust/target/release/my-tools-agent.exe release-files/
-          Copy-Item desktop/target/release/my-tools.exe release-files/
-          Copy-Item scripts/install-my-tools.ps1 release-files/
-          Copy-Item MY_TOOLS.md release-files/README.md
-          Compress-Archive -Path release-files/* -DestinationPath release-dist/MyTools-windows-x64.zip
-          $sha = (Get-FileHash -Algorithm SHA256 release-dist/MyTools-windows-x64.zip).Hash
+          Copy-Item desktop/target/release/my-tools.exe release-dist/my-tools.exe
+          $sha = (Get-FileHash -Algorithm SHA256 release-dist/my-tools.exe).Hash
           [System.IO.File]::WriteAllText(
             (Join-Path (Resolve-Path release-dist) 'SHA256SUMS.txt'),
-            "$sha  MyTools-windows-x64.zip" + [Environment]::NewLine,
+            "$sha  my-tools.exe" + [Environment]::NewLine,
             [System.Text.UTF8Encoding]::new($false)
           )
       - name: Publish GitHub release
@@ -64,7 +58,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$env:GITHUB_REF_NAME" `
-            release-dist/MyTools-windows-x64.zip `
+            release-dist/my-tools.exe `
             release-dist/SHA256SUMS.txt `
             --verify-tag `
             --title "My Tools $env:GITHUB_REF_NAME" `

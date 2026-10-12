@@ -3,11 +3,34 @@
 use gpui_kit::base::StyledExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::ActiveTheme as _;
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use std::net::{SocketAddr, TcpStream};
-use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::Command;
 use std::time::Duration;
+
+// One executable and one process. The Win32 tray runs on a background thread;
+// GPUI remains on the primary UI thread.
+#[cfg(windows)]
+#[path = "../../rust/src/agent.rs"]
+mod agent;
+#[cfg(windows)]
+mod install;
+#[cfg(windows)]
+#[path = "../../rust/src/notes.rs"]
+mod notes;
+#[cfg(windows)]
+#[path = "../../rust/src/receiver.rs"]
+mod receiver;
+#[cfg(windows)]
+#[path = "../../rust/src/tools.rs"]
+mod tools;
+#[cfg(windows)]
+#[path = "../../rust/src/update.rs"]
+mod update;
+#[cfg(windows)]
+#[path = "../../rust/src/win.rs"]
+mod win;
 
 const RECEIVER_PORT: u16 = 8765;
 
@@ -19,36 +42,6 @@ fn receiver_online() -> bool {
     .is_ok()
 }
 
-fn receiver_candidates() -> Vec<PathBuf> {
-    let mut candidates = Vec::new();
-    if let Ok(executable) = std::env::current_exe() {
-        if let Some(parent) = executable.parent() {
-            candidates.push(parent.join("my-tools-agent.exe"));
-        }
-    }
-    candidates.push(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../rust/target/release/my-tools-agent.exe"),
-    );
-    candidates
-}
-
-fn start_receiver() -> Result<&'static str, String> {
-    if receiver_online() {
-        return Ok("Receiver is already running in the tray.");
-    }
-    let binary = receiver_candidates()
-        .into_iter()
-        .find(|path| path.exists())
-        .ok_or_else(|| "Receiver not found. Build it with build_windows.bat first.".to_string())?;
-    Command::new(&binary)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|error| format!("Failed to start receiver: {error}"))?;
-    Ok("Starting the image receiver in the Windows tray…")
-}
-
 fn pairing_url() -> String {
     format!("http://127.0.0.1:{RECEIVER_PORT}/pair")
 }
@@ -56,9 +49,6 @@ fn pairing_url() -> String {
 #[cfg(windows)]
 fn open_prompt_notes() -> Result<&'static str, String> {
     use windows_sys::Win32::UI::WindowsAndMessaging::{FindWindowW, PostMessageW, WM_APP};
-    if !receiver_online() {
-        start_receiver()?;
-    }
     let classname: Vec<u16> = "MyToolsAgentWin32".encode_utf16().chain(Some(0)).collect();
     // The receiver starts almost instantly, but allow a brief moment for its
     // native message window to be registered before opening the scratchpad.
@@ -74,7 +64,7 @@ fn open_prompt_notes() -> Result<&'static str, String> {
         }
         std::thread::sleep(Duration::from_millis(100));
     }
-    Err("Prompt Notes receiver did not start. Exit the old tray process and run upgrade_windows.bat.".into())
+    Err("Prompt Notes is starting. Exit any older Snap to Prompt tray process and relaunch My Tools.".into())
 }
 
 #[cfg(not(windows))]
@@ -108,14 +98,6 @@ impl Hub {
         }
     }
 
-    fn start(&mut self, cx: &mut Context<Self>) {
-        self.status = match start_receiver() {
-            Ok(message) => message.into(),
-            Err(error) => error,
-        };
-        cx.notify();
-    }
-
     fn show_pairing(&mut self, cx: &mut Context<Self>) {
         if !receiver_online() {
             self.status = "Start the receiver first, then open the pairing QR.".into();
@@ -131,6 +113,15 @@ impl Hub {
     fn show_prompt_notes(&mut self, cx: &mut Context<Self>) {
         self.status = match open_prompt_notes() {
             Ok(message) => message.into(),
+            Err(message) => message,
+        };
+        cx.notify();
+    }
+
+    #[cfg(windows)]
+    fn install(&mut self, cx: &mut Context<Self>) {
+        self.status = match install::install() {
+            Ok(message) => message,
             Err(message) => message,
         };
         cx.notify();
@@ -214,11 +205,6 @@ impl Render for Hub {
                                     .on_click(cx.listener(|this, _, _, cx| this.show_pairing(cx))),
                             )
                             .child(
-                                Button::new("start-image-receiver")
-                                    .label("Start receiver")
-                                    .on_click(cx.listener(|this, _, _, cx| this.start(cx))),
-                            )
-                            .child(
                                 Button::new("refresh-image-status")
                                     .label("Refresh")
                                     .on_click(cx.listener(|_, _, _, cx| cx.notify())),
@@ -254,19 +240,72 @@ impl Render for Hub {
                     .text_color(theme.muted_foreground)
                     .child(self.status.clone()),
             )
+            .when(cfg!(windows) && !install::is_installed(), |element| {
+                element.child(
+                    Button::new("install-my-tools")
+                        .label("Install My Tools for startup and automatic updates")
+                        .on_click(cx.listener(|this, _, _, cx| this.install(cx))),
+                )
+            })
     }
 }
 
 fn main() {
-    application().with_assets(assets::Assets).run(|cx| {
+    #[cfg(windows)]
+    {
+        if std::env::args().any(|arg| arg == "--install") {
+            match install::install() {
+                Ok(message) => win::info_dialog(&message),
+                Err(error) => win::error_dialog(&error),
+            }
+            return;
+        }
+        // Test-only mode for headless Windows CI runners. Still the same EXE,
+        // but skips GPUI initialization when no interactive desktop exists.
+        if std::env::args().any(|arg| arg == "--headless-test") {
+            if let Err(error) = agent::run() {
+                win::error_dialog(&error);
+            }
+            return;
+        }
+        // A second launch simply reveals the already running desktop window.
+        if win::another_instance_running() {
+            win::show_hub();
+            return;
+        }
+        std::thread::Builder::new()
+            .name("my-tools-tray".into())
+            .spawn(|| {
+                if let Err(error) = agent::run() {
+                    win::error_dialog(&error);
+                }
+            })
+            .expect("Cannot start tray thread");
+    }
+    let initially_hidden = std::env::args().any(|arg| arg == "--minimized");
+    application().with_assets(assets::Assets).run(move |cx| {
         init(cx);
         let options = WindowOptions {
             titlebar: Some(TitlebarOptions {
                 title: Some("My Tools".into()),
                 ..Default::default()
             }),
+            show: !initially_hidden,
             ..WindowOptions::default()
         };
-        open_window(options, cx, |_, cx| cx.new(|_| Hub::new())).expect("Unable to open My Tools");
+        open_window(options, cx, |window, cx| {
+            #[cfg(windows)]
+            window.on_window_should_close(cx, |_, cx| {
+                if win::exiting() {
+                    cx.quit();
+                    true
+                } else {
+                    win::hide_hub();
+                    false
+                }
+            });
+            cx.new(|_| Hub::new())
+        })
+        .expect("Unable to open My Tools");
     });
 }

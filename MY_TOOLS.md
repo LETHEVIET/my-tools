@@ -1,5 +1,9 @@
 # My Tools — desktop hub and first tool
 
+**Since v0.4.0 My Tools distributes exactly one executable:** `my-tools.exe`. It opens the GPUI Kit dashboard when double-clicked. Closing the window hides to the system tray; double-click the tray icon to reopen. The HTTP image receiver and global Prompt Notes hotkey operate on background threads in the same process. Choose **Exit My Tools** in the tray menu to stop it. `my-tools.exe --minimized` launches directly into the tray. The native Rust modules remain separate in source for maintainability, but are linked into the **same executable**.
+
+The download is the executable alone; no second EXE, ZIP unpacking, or installer script is required. Optionally click **Install My Tools** inside the app to copy itself to `%LOCALAPPDATA%\Programs\MyTools` and enable tray startup and private GitHub updates. See [UPDATE_GUIDE.md](UPDATE_GUIDE.md).
+
 **GitHub CI/CD and the release updater:** see [UPDATE_GUIDE.md](UPDATE_GUIDE.md). The source repository is private and the installable release uses automatic version checks, without leaving a GitHub subprocess running.
 
 **My Tools** is a growing collection of utilities for Windows and iPhone. This is the **application name**, not the name of an individual utility. The first tool is **Snap to Paste Image**: snap or select an iPhone image and paste it automatically into the focused Windows prompt. The second is **Prompt Notes**, a quick Windows scratchpad for composing longer prompts before pasting them into your AI assistant.
@@ -8,8 +12,7 @@
 
 | Component | Executable | Display name |
 | --- | --- | --- |
-| Desktop hub (GPUI Kit) | `desktop\target\release\my-tools.exe` | **My Tools** |
-| Small tray/HTTP/shortcut process | `rust\target\release\my-tools-agent.exe` | **My Tools — Background Agent** |
+| GPUI Kit desktop and Win32 tray | `desktop\target\release\my-tools.exe` | **My Tools** (one process) |
 | iPhone photo utility | Inside the hub | **Snap to Paste Image** |
 | Windows prompt utility | Inside the hub | **Prompt Notes** |
 
@@ -30,14 +33,14 @@ Drafts auto-save while typing and are restored after restarting Windows. They li
 
 If Ctrl+Alt+P conflicts with another app, the receiver displays a warning and the **Prompt Notes** tray menu still works. Windows may prevent simulated Ctrl+V in elevated apps or if the previous window disappeared; in that case, the text remains on the clipboard for manual pasting. If you close the note without pasting, your draft remains saved.
 
-The hub uses GPUI Kit's built-in default theme. The always-on Prompt Notes popup intentionally uses Windows' native dialog controls so it has no GPUI runtime cost when the hub is closed.
+The hub uses GPUI Kit's built-in default theme. Prompt Notes uses Windows' native dialog controls. With one EXE and one process, GPUI remains loaded when the hub is hidden; that costs more idle memory than the old agent-only process, but simplifies installation and operation.
 
 ## App layout
 
 | Component | Location | Responsibility |
 | --- | --- | --- |
 | My Tools desktop hub | `desktop/` | GPUI Kit native desktop window; default built-in theme and components; start receiver and open pairing QR |
-| Background receiver | `rust/` | Tiny standalone Win32 tray and HTTP photo receiver; does not load GPUI Kit |
+| Background services (linked into `my-tools.exe`) | `rust/` | Win32 tray, global hotkey, and HTTP receiver on background threads in the same process |
 | Prompt Notes | `rust/src/notes.rs` | Global hotkey, small native scratchpad, autosave, text clipboard and paste-back |
 | iPhone tools index | `web/index.html` | Launch available mobile tools |
 | Snap to Paste Image | `web/tools/snap-to-paste-image/` | Camera and library picker, image upload |
@@ -45,8 +48,8 @@ The hub uses GPUI Kit's built-in default theme. The always-on Prompt Notes popup
 
 ## Windows run steps
 
-1. Build the small tray agent with `build_windows.bat` and start it with `start_windows.bat`. To replace an already-running old EXE, exit it from the tray first (or use `upgrade_windows.bat`).
-2. Run `build_hub_windows.bat` and `start_hub_windows.bat` to open the native **My Tools** desktop hub. The **Prompt Notes** shortcut works without opening this hub.
+1. Build the single app with `build_hub_windows.bat` (or `build_windows.bat`). Exit any old version from the tray before replacing its running executable.
+2. Run `start_hub_windows.bat` to open **My Tools**, or `start_windows.bat` to start hidden in the tray. The **Prompt Notes** shortcut works even when the dashboard is hidden.
 3. GPUI Kit requires Rust MSVC, Windows SDK, Visual Studio C++ Build Tools, and CMake. Install CMake with `winget install Kitware.CMake`. If working inside this repo's `.venv`, `python -m pip install cmake` is also an option; the build script detects `.venv\Scripts\cmake.exe`.
 4. In **My Tools**, choose **Pair iPhone** to open the QR code. On your phone, the `My Tools` page lists **Snap to Paste Image** as its first tool.
 5. Leave the small receiver running in the system tray even after closing the hub window. The GPUI hub does not need to remain open for photo uploads.

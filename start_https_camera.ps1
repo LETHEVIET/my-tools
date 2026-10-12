@@ -3,7 +3,7 @@
 param([int]$Port = 8765)
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
-$exe = Join-Path $PSScriptRoot "rust\target\release\my-tools-agent.exe"
+$exe = Join-Path $PSScriptRoot "desktop\target\release\my-tools.exe"
 if (-not (Test-Path $exe)) {
     throw "Build the receiver first with build_windows.bat."
 }
@@ -35,7 +35,7 @@ try {
     Write-Host "Secure camera URL: $url"
     Write-Host "A QR code will open in your PC browser. Scan it with your iPhone."
     Write-Host "Photos travel through Cloudflare in this optional mode, not directly over local Wi-Fi."
-    $receiver = Start-Process -FilePath $exe -ArgumentList @("--port", "$Port", "--public-url", $url, "--show") -PassThru
+    $receiver = Start-Process -FilePath $exe -ArgumentList @("--minimized", "--port", "$Port", "--public-url", $url, "--show") -PassThru
     Wait-Process -Id $receiver.Id
 } finally {
     if ($tunnel -and -not $tunnel.HasExited) { Stop-Process -Id $tunnel.Id -Force -ErrorAction SilentlyContinue }

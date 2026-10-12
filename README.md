@@ -1,48 +1,31 @@
 # My Tools
 
-A personal collection of lightweight Windows and iPhone utilities, built with Rust and GPUI Kit.
+One Windows app containing a personal toolbox, written in Rust and GPUI Kit (default theme).
 
-**Currently available**
+**One executable — `my-tools.exe`.** Double-click to show the desktop hub; close the window to hide to the system tray. Double-click the tray icon to show it again; choose **Exit My Tools** to quit. Image upload, clipboard pasting, and Prompt Notes hotkeys continue to run while the hub is hidden, all within the **same process**.
 
-- **Snap to Paste Image** — take a photo or choose existing photos on iPhone; send the image to Windows and paste into the active AI prompt.
-- **Prompt Notes** — press **Ctrl+Alt+P** on Windows to open a scratchpad for longer prompts, then **Ctrl+Enter** to copy and paste back into the previous application. Your draft is saved locally.
+## Tools
 
-The optional GPUI desktop hub uses its default theme. A separate ~sub-megabyte native Rust agent powers the tray, hotkeys, clipboard operations, and iPhone receiver in the background. Closing the hub does not stop these utilities.
+- **Snap to Paste Image:** take or select iPhone photos and paste them directly into the focused Windows AI prompt.
+- **Prompt Notes:** press **Ctrl+Alt+P** to compose a longer prompt, then **Ctrl+Enter** to paste back into the prior app. Notes auto-save locally.
 
-## Download and install
+## Install
 
-Open the **Releases** page in the private repository: https://github.com/LETHEVIET/my-tools/releases
+Get the latest **`my-tools.exe`** from your private [GitHub Releases](https://github.com/LETHEVIET/my-tools/releases). Run it directly without an installer script. To enable startup and automatic updates, click **Install My Tools for startup and automatic updates** inside the hub. See [UPDATE_GUIDE.md](UPDATE_GUIDE.md).
 
-Download **MyTools-windows-x64.zip**, extract the archive, then run the included PowerShell installer in the extracted folder:
+## Build from source
 
-    powershell -ExecutionPolicy Bypass -File .\install-my-tools.ps1
+On Windows with Rust MSVC, Visual Studio C++ build tools, the Windows SDK, and CMake installed:
 
-This installs My Tools per user, adds a Start Menu shortcut and runs the tray agent at Windows login. No administrator account is needed for installation. For future updates from the private repo, install **GitHub CLI** and authenticate using **gh auth login**. The background agent checks for new releases on startup and approximately every six hours.
+```batch
+build_hub_windows.bat
+start_hub_windows.bat
+```
 
-## Build from source (Windows)
+The compiled app is `desktop\target\release\my-tools.exe`. `start_windows.bat` launches it with `--minimized`, directly to the tray. Development startup and build scripts are not included with the downloadable release.
 
-Install Rust (MSVC target), the Visual Studio C++/Windows SDK toolchain, and CMake.
+The desktop hub and background tasks share **one binary and one process**. The native agent source in `rust/src/` is included in the desktop build; its smaller standalone test crate is not shipped.
 
-    build_windows.bat
-    build_hub_windows.bat
-    start_windows.bat
-    start_hub_windows.bat
+Further details: [MY_TOOLS.md](MY_TOOLS.md), [RUST_SETUP.md](RUST_SETUP.md), [UPDATE_GUIDE.md](UPDATE_GUIDE.md).
 
-Developer builds do not auto-update. Only installations made using the release installer do.
-
-## Repository layout
-
-| Directory | Purpose |
-| --- | --- |
-| `rust/` | Background tray agent; global shortcut, clipboard, notes, image receiver and release updater |
-| `desktop/` | GPUI Kit desktop hub, built with the default theme |
-| `web/` | iPhone web tools and PWA assets |
-| `scripts/` | PowerShell installer and verified GitHub Release updater |
-| `.github/workflows/` | Windows CI and tagged-release publishing |
-| `tests/` | HTTP, pairing and image processing tests |
-
-See **[MY_TOOLS.md](MY_TOOLS.md)** for features and architecture, **[UPDATE_GUIDE.md](UPDATE_GUIDE.md)** for CI/CD and private-release auto-updates, and **[RUST_SETUP.md](RUST_SETUP.md)** for local photo pairing and HTTPS camera options.
-
-### Security and limitations
-
-LAN HTTP photo transfer is not encrypted; use a trusted private Wi-Fi network, or configure a trusted HTTPS endpoint. The iPhone's in-page live camera requires HTTPS. Prompt Notes drafts are stored as local, unencrypted text. The Windows binaries currently do not have Authenticode signatures. Auto-updates authenticate through your GitHub CLI account, verify the release SHA-256 checksum, and keep the original user data in a separate directory.
+**Security:** LAN HTTP photo transfers are not encrypted; live iPhone camera preview requires HTTPS. Prompt Notes drafts are local unencrypted text. Private GitHub updates use `gh auth login` credentials and validate SHA-256 against the release checksum; Windows binaries are not signed yet.

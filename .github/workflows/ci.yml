@@ -29,7 +29,7 @@ jobs:
       - name: Check updater scripts parse
         shell: pwsh
         run: |
-          foreach ($script in @('scripts/update-my-tools.ps1','scripts/install-my-tools.ps1')) {
+          foreach ($script in @('scripts/update-my-tools.ps1')) {
             $tokens = $null
             $errors = $null
             [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $script), [ref]$tokens, [ref]$errors) | Out-Null
@@ -37,18 +37,16 @@ jobs:
           }
       - name: Install Python test dependencies
         run: python -m pip install -r requirements.txt
-      - name: Test Rust agent
+      - name: Test Rust Win32 modules
         run: cargo test --locked --manifest-path rust/Cargo.toml
-      - name: Build agent
-        run: cargo build --release --locked --manifest-path rust/Cargo.toml
-      - name: Check and build GPUI Kit hub
+      - name: Check and build single-file My Tools app
         run: |
           cargo check --locked --manifest-path desktop/Cargo.toml
           cargo build --release --locked --manifest-path desktop/Cargo.toml
       - name: Run Windows HTTP integration tests
         shell: pwsh
         run: |
-          $env:MY_TOOLS_AGENT_BIN = (Resolve-Path rust/target/release/my-tools-agent.exe).Path
+          $env:MY_TOOLS_AGENT_BIN = (Resolve-Path desktop/target/release/my-tools.exe).Path
           python -m unittest discover -s tests -v
       - name: Preserve CI executables
         uses: actions/upload-artifact@v4
@@ -56,5 +54,4 @@ jobs:
           name: MyTools-windows-ci
           path: |
             desktop/target/release/my-tools.exe
-            rust/target/release/my-tools-agent.exe
           if-no-files-found: error
