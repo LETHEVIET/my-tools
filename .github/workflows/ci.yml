@@ -10,6 +10,12 @@ on:
 permissions:
   contents: read
 
+# When rapidly pushing several fixes to one branch, avoid paying for obsolete
+# full native builds. Tagged releases have a separate workflow and aren't canceled.
+concurrency:
+  group: windows-ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   validate:
     name: Build and test Windows applications
@@ -17,6 +23,17 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+      # GPUI Kit has a large native dependency graph. Cache compiled Rust
+      # dependencies for both Cargo projects; share with tagged release jobs.
+      - name: Restore Rust dependency cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: my-tools-windows-release
+          add-job-id-key: false
+          workspaces: |
+            rust -> target
+            desktop -> target
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -39,10 +56,10 @@ jobs:
         run: python -m pip install -r requirements.txt
       - name: Test Rust Win32 modules
         run: cargo test --locked --manifest-path rust/Cargo.toml
-      - name: Check and build single-file My Tools app
-        run: |
-          cargo check --locked --manifest-path desktop/Cargo.toml
-          cargo build --release --locked --manifest-path desktop/Cargo.toml
+      - name: Build My Tools (optimized Windows executable)
+        # A release build already type-checks the app. Running cargo check
+        # first compiles GPUI dependencies again under a different profile.
+        run: cargo build --release --locked --manifest-path desktop/Cargo.toml
       - name: Run Windows HTTP integration tests
         shell: pwsh
         run: |

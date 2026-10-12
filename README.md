@@ -39,4 +39,7 @@ The desktop hub and background tasks share **one binary and one process**. The n
 
 Further details: [MY_TOOLS.md](MY_TOOLS.md), [RUST_SETUP.md](RUST_SETUP.md), [UPDATE_GUIDE.md](UPDATE_GUIDE.md).
 
+**Windows CI or release building slowly?** See [BUILD_PERFORMANCE.md](BUILD_PERFORMANCE.md)
+for the measured baseline and shared Cargo cache settings.
+
 **Security:** LAN HTTP photo transfers are not encrypted; live iPhone camera preview requires HTTPS. Prompt Notes drafts and Quick Notes are local unencrypted text. Public GitHub updates download over HTTPS and validate SHA-256 against the release checksum; Windows binaries are not signed yet.

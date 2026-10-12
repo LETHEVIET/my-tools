@@ -25,7 +25,10 @@ windows-sys = { version = "0.61", features = [
 ] }
 
 [profile.release]
-lto = "thin"
-codegen-units = 8
+# Prefer short feedback cycles for a desktop utility. Cross-crate ThinLTO
+# substantially slows clean Windows linking for GPUI's large dependency graph.
+# This may produce a somewhat larger EXE; the release still uses opt-level 2.
+lto = "off"
+codegen-units = 16
 opt-level = 2
 strip = "symbols"

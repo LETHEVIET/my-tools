@@ -16,6 +16,16 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Restore Rust dependency cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          # Reuse caches written by CI on main; tags only read from the cache.
+          shared-key: my-tools-windows-release
+          add-job-id-key: false
+          workspaces: |
+            rust -> target
+            desktop -> target
+          save-if: false
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
