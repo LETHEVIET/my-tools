@@ -27,13 +27,34 @@ class SingleAppTrayTest(unittest.TestCase):
         user32.PostMessageW.restype = ctypes.c_int
         user32.GetWindowThreadProcessId.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulong)]
         user32.GetWindowThreadProcessId.restype = ctypes.c_ulong
+        user32.GetClassNameW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_int]
+        user32.GetClassNameW.restype = ctypes.c_int
+        CALLBACK = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_ssize_t)
+        user32.EnumWindows.argtypes = [CALLBACK, ctypes.c_ssize_t]
+        user32.EnumWindows.restype = ctypes.c_int
 
         def owned_window(class_name, title, pid):
-            hwnd = user32.FindWindowW(class_name, title)
-            window_pid = ctypes.c_ulong()
-            if hwnd:
+            found = []
+            @CALLBACK
+            def check(hwnd, _):
+                window_pid = ctypes.c_ulong()
                 user32.GetWindowThreadProcessId(hwnd, ctypes.byref(window_pid))
-            return hwnd if window_pid.value == pid else None
+                if window_pid.value != pid:
+                    return 1
+                if class_name is not None:
+                    name = ctypes.create_unicode_buffer(120)
+                    user32.GetClassNameW(hwnd, name, len(name))
+                    if name.value != class_name:
+                        return 1
+                if title is not None:
+                    name = ctypes.create_unicode_buffer(120)
+                    user32.GetWindowTextW(hwnd, name, len(name))
+                    if name.value != title:
+                        return 1
+                found.append(hwnd)
+                return 0
+            user32.EnumWindows(check, 0)
+            return found[0] if found else None
 
         def until(predicate, seconds=16):
             deadline = time.monotonic() + seconds
@@ -50,12 +71,13 @@ class SingleAppTrayTest(unittest.TestCase):
             with socket.socket() as sock:
                 sock.bind(("127.0.0.1", 0))
                 port = sock.getsockname()[1]
-            env = dict(os.environ, LOCALAPPDATA=tmp)
+            instance = f"tray-{os.getpid()}-{port}"
+            env = dict(os.environ, LOCALAPPDATA=tmp, MY_TOOLS_TEST_INSTANCE_ID=instance)
             proc = subprocess.Popen([str(BIN), "--minimized", "--host", "127.0.0.1",
                                      "--port", str(port)], env=env)
             try:
                 tray = until(lambda: owned_window("MyToolsAgentWin32", None, proc.pid))
-                hub = until(lambda: owned_window(None, "My Tools", proc.pid))
+                hub = until(lambda: owned_window(None, f"My Tools [test-{instance}]", proc.pid))
                 self.assertFalse(user32.IsWindowVisible(hub))
 
                 # The same tray process shows the GPUI window.

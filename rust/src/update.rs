@@ -1,7 +1,7 @@
 //! GitHub release updates for a per-user My Tools installation.
 //!
-//! The agent stays tiny: only a periodic check subprocess uses PowerShell and
-//! the GitHub CLI. GitHub authentication remains in gh's Windows credential store.
+//! Periodic update checks fetch public GitHub Releases over HTTPS using PowerShell.
+//! No GitHub CLI, login, or permanently running update process is required.
 use std::fs;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -130,6 +130,8 @@ mod tests {
     fn embeds_release_verification_and_private_repo() {
         assert_eq!(REPOSITORY, "LETHEVIET/my-tools");
         assert!(SCRIPT.contains("Get-FileHash"));
-        assert!(SCRIPT.contains("gh release download"));
+        assert!(SCRIPT.contains("Invoke-RestMethod"));
+        assert!(SCRIPT.contains("https://api.github.com/repos/"));
+        assert!(!SCRIPT.contains("gh release download"));
     }
 }

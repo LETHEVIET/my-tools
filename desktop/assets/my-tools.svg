@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" fill="none">
+  <title>My Tools application icon</title>
+  <defs>
+    <linearGradient id="bg" x1="115" y1="104" x2="915" y2="927" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#3AD3F4"/>
+      <stop offset=".4" stop-color="#1C61F3"/>
+      <stop offset="1" stop-color="#1535AF"/>
+    </linearGradient>
+    <linearGradient id="box" x1="347" y1="612" x2="692" y2="887" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#DCEBFF"/>
+    </linearGradient>
+    <linearGradient id="photo" x1="397" y1="309" x2="645" y2="564" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#32DAF5"/>
+      <stop offset="1" stop-color="#1874EA"/>
+    </linearGradient>
+    <linearGradient id="paper" x1="638" y1="425" x2="835" y2="658" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFF371"/>
+      <stop offset=".6" stop-color="#FFD044"/>
+      <stop offset="1" stop-color="#FF9E26"/>
+    </linearGradient>
+    <linearGradient id="mark" x1="451" y1="737" x2="614" y2="855" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#28C5FF"/>
+      <stop offset="1" stop-color="#2254F2"/>
+    </linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="14" stdDeviation="20" flood-color="#081843" flood-opacity=".32"/>
+    </filter>
+    <clipPath id="clip"><rect x="104" y="104" width="816" height="816" rx="174"/></clipPath>
+  </defs>
+  <rect width="1024" height="1024" fill="#0C1630"/>
+  <rect x="104" y="104" width="816" height="816" rx="174" fill="url(#bg)"/>
+  <g clip-path="url(#clip)">
+    <circle cx="292" cy="232" r="390" fill="#B3FAFF" opacity=".07"/>
+    <ellipse cx="529" cy="875" rx="276" ry="57" fill="#08194D" opacity=".24"/>
+
+    <!-- Wrench: a recognizable tools silhouette at small sizes -->
+    <g transform="rotate(-20 349 561)" filter="url(#shadow)">
+      <path d="M305 365c31-21 74-21 105 1l-53 53 15 58 58 14 53-53c21 31 22 74 0 105-25 36-71 53-113 43L280 677c-29 29-77 29-106 0s-29-77 0-106l90-90c-10-42 6-90 41-116Z" fill="#F2F8FF"/>
+      <circle cx="228" cy="624" r="22" fill="#D3E6FF"/>
+    </g>
+
+    <!-- Image capture card -->
+    <g transform="rotate(-10 523 440)" filter="url(#shadow)">
+      <rect x="354" y="242" width="324" height="347" rx="52" fill="#F5FAFF"/>
+      <rect x="389" y="279" width="255" height="275" rx="31" fill="url(#photo)"/>
+      <circle cx="557" cy="365" r="35" fill="#EFFAFF"/>
+      <path d="M408 529 487 422c9-12 26-13 36-2l61 67 25-25c10-10 26-10 35 1v54c0 20-16 36-36 36H424c-16 0-25-13-16-24Z" fill="#E7F6FF"/>
+    </g>
+
+    <!-- Note card -->
+    <g transform="rotate(11 732 538)" filter="url(#shadow)">
+      <rect x="606" y="405" width="233" height="276" rx="35" fill="url(#paper)"/>
+      <path d="M785 405v46c0 19 15 34 34 34h20" stroke="#FFEAA7" stroke-width="14" stroke-linejoin="round"/>
+      <path d="M649 491h113M649 545h105M649 599h74" stroke="#DB7C20" stroke-width="18" stroke-linecap="round"/>
+    </g>
+
+    <!-- The My Tools organizer -->
+    <g filter="url(#shadow)">
+      <path d="M256 636c0-28 23-51 51-51h97c17 0 34 7 46 20l31 35c10 11 24 18 39 18h187c28 0 50 22 50 50v88c0 55-44 99-99 99H365c-55 0-99-44-99-99V688c0-19-10-34-10-52Z" fill="url(#box)"/>
+      <path d="M269 653c5-25 22-39 48-39h93c15 0 25 7 38 22l29 31c11 12 25 18 41 18h227" stroke="#FFFFFF" stroke-width="18" stroke-linecap="round" opacity=".7"/>
+      <path d="M441 854V735c0-17 14-31 31-31h15l57 55 57-55h15c17 0 31 14 31 31v119h-52v-77l-51 50-51-50v77h-52Z" fill="url(#mark)"/>
+    </g>
+  </g>
+</svg>

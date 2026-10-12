@@ -4,7 +4,8 @@ use std::fs;
 use std::mem::{size_of, zeroed};
 use std::path::PathBuf;
 use std::ptr::{null, null_mut};
-use std::sync::atomic::{AtomicIsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
+use std::sync::{Mutex, OnceLock};
 
 use windows_sys::Win32::Foundation::{GlobalFree, HWND, LPARAM, LRESULT, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::{
@@ -22,12 +23,14 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, GetForegroundWindow, GetSystemMetrics, GetWindowTextLengthW,
     GetWindowTextW, IsWindow, KillTimer, MessageBoxW, MoveWindow, RegisterClassW, SendMessageW,
     SetForegroundWindow, SetTimer, SetWindowTextW, ShowWindow, BN_CLICKED, EN_CHANGE,
-    ES_AUTOVSCROLL, ES_MULTILINE, ES_WANTRETURN, MB_ICONWARNING, MB_OK, SM_CXSCREEN, SM_CYSCREEN,
-    SW_HIDE, SW_RESTORE, SW_SHOW, WM_CLOSE, WM_COMMAND, WM_DESTROY, WM_KEYDOWN, WM_SETFOCUS,
-    WM_SETFONT, WM_SIZE, WM_TIMER, WNDCLASSW, WS_CHILD, WS_CLIPCHILDREN, WS_EX_CLIENTEDGE,
-    WS_EX_TOOLWINDOW, WS_OVERLAPPEDWINDOW, WS_TABSTOP, WS_VISIBLE, WS_VSCROLL,
+    ES_AUTOVSCROLL, ES_MULTILINE, ES_WANTRETURN, LBN_DBLCLK, LBS_NOTIFY, LB_ADDSTRING,
+    LB_GETCURSEL, LB_RESETCONTENT, MB_ICONWARNING, MB_OK, SM_CXSCREEN, SM_CYSCREEN, SW_HIDE,
+    SW_RESTORE, SW_SHOW, WM_CLOSE, WM_COMMAND, WM_DESTROY, WM_KEYDOWN, WM_SETFOCUS, WM_SETFONT,
+    WM_SIZE, WM_TIMER, WNDCLASSW, WS_CHILD, WS_CLIPCHILDREN, WS_EX_CLIENTEDGE, WS_EX_TOOLWINDOW,
+    WS_OVERLAPPEDWINDOW, WS_TABSTOP, WS_VISIBLE, WS_VSCROLL,
 };
 
+use crate::quick_notes_store;
 use crate::win;
 
 const POPUP_CLASS: &str = "MyToolsPromptNotesPopup";
@@ -36,11 +39,22 @@ const PASTE_ID: usize = 3102;
 const COPY_ID: usize = 3103;
 const CLOSE_ID: usize = 3104;
 const TIMER_SAVE: usize = 3105;
+const SAVED_ID: usize = 3107;
 const MAX_CHARS: usize = 500_000;
 
 static POPUP: AtomicIsize = AtomicIsize::new(0);
 static EDIT: AtomicIsize = AtomicIsize::new(0);
 static TARGET: AtomicIsize = AtomicIsize::new(0);
+static QUICK_MODE: AtomicBool = AtomicBool::new(false);
+static SAVED_LIST: AtomicIsize = AtomicIsize::new(0);
+static SAVED_PATHS: OnceLock<Mutex<Vec<PathBuf>>> = OnceLock::new();
+
+fn is_quick() -> bool {
+    QUICK_MODE.load(Ordering::Relaxed)
+}
+fn saved_paths() -> &'static Mutex<Vec<PathBuf>> {
+    SAVED_PATHS.get_or_init(|| Mutex::new(Vec::new()))
+}
 
 fn wide(text: &str) -> Vec<u16> {
     text.encode_utf16().chain(Some(0)).collect()
@@ -49,7 +63,13 @@ fn wide(text: &str) -> Vec<u16> {
 fn draft_path() -> Option<PathBuf> {
     std::env::var_os("LOCALAPPDATA")
         .or_else(|| std::env::var_os("USERPROFILE"))
-        .map(|home| PathBuf::from(home).join("MyTools").join("prompt-notes.txt"))
+        .map(|home| {
+            PathBuf::from(home).join("MyTools").join(if is_quick() {
+                "quick-note-draft.txt"
+            } else {
+                "prompt-notes.txt"
+            })
+        })
 }
 
 fn load_draft() -> String {
@@ -133,7 +153,7 @@ pub fn is_popup_foreground() -> bool {
     !popup.is_null() && unsafe { GetForegroundWindow() } == popup
 }
 
-pub fn show(tray: HWND, from_shortcut: bool) {
+pub fn show(tray: HWND, from_shortcut: bool, quick: bool) {
     let previous = unsafe { GetForegroundWindow() };
     let mut popup = POPUP.load(Ordering::Relaxed) as HWND;
     // If opened from a text prompt via Ctrl+Alt+P, remember that window so the
@@ -143,6 +163,11 @@ pub fn show(tray: HWND, from_shortcut: bool) {
     } else if !from_shortcut || popup.is_null() {
         TARGET.store(0, Ordering::Relaxed);
     }
+    let was_quick = is_quick();
+    if was_quick != quick && !popup.is_null() {
+        save_draft();
+    }
+    QUICK_MODE.store(quick, Ordering::Relaxed);
     unsafe {
         if popup.is_null() {
             popup = create_popup();
@@ -151,12 +176,135 @@ pub fn show(tray: HWND, from_shortcut: bool) {
                 return;
             }
         }
+        if was_quick != quick {
+            SetWindowTextW(
+                EDIT.load(Ordering::Relaxed) as HWND,
+                wide(&load_draft()).as_ptr(),
+            );
+        }
+        update_mode(popup);
         ShowWindow(popup, SW_RESTORE);
         SetForegroundWindow(popup);
         let edit = EDIT.load(Ordering::Relaxed) as HWND;
         if !edit.is_null() {
             SetFocus(edit);
         }
+    }
+}
+
+fn refresh_saved_notes() {
+    let list = SAVED_LIST.load(Ordering::Relaxed) as HWND;
+    if list.is_null() {
+        return;
+    }
+    let notes = quick_notes_store::recent(15);
+    let mut paths = saved_paths().lock().unwrap();
+    paths.clear();
+    unsafe {
+        SendMessageW(list, LB_RESETCONTENT, 0, 0);
+        for (path, title) in notes {
+            SendMessageW(list, LB_ADDSTRING, 0, wide(&title).as_ptr() as isize);
+            paths.push(path);
+        }
+    }
+}
+
+fn open_saved_note() {
+    let list = SAVED_LIST.load(Ordering::Relaxed) as HWND;
+    let index = unsafe { SendMessageW(list, LB_GETCURSEL, 0, 0) } as i32;
+    if index < 0 {
+        return;
+    }
+    let path = saved_paths().lock().unwrap().get(index as usize).cloned();
+    if let Some(path) = path {
+        if let Ok(content) = fs::read_to_string(&path) {
+            // The saved file is kept intact; saving again creates another note.
+            unsafe {
+                SetWindowTextW(
+                    EDIT.load(Ordering::Relaxed) as HWND,
+                    wide(&content).as_ptr(),
+                );
+            }
+        }
+    }
+}
+
+fn save_quick_note() {
+    match quick_notes_store::save(&current_text()) {
+        Ok(_) => {
+            unsafe {
+                SetWindowTextW(EDIT.load(Ordering::Relaxed) as HWND, wide("").as_ptr());
+            }
+            save_draft();
+            refresh_saved_notes();
+            hide();
+        }
+        Err(message) => warning(&message),
+    }
+}
+
+fn open_quick_notes_folder() {
+    match quick_notes_store::folder() {
+        Ok(folder) => {
+            if let Err(error) = fs::create_dir_all(&folder) {
+                warning(&error.to_string());
+                return;
+            }
+            if let Err(error) = std::process::Command::new("explorer.exe")
+                .arg(folder)
+                .spawn()
+            {
+                warning(&error.to_string());
+            }
+        }
+        Err(error) => warning(&error),
+    }
+}
+
+fn update_mode(hwnd: HWND) {
+    let quick = is_quick();
+    unsafe {
+        SetWindowTextW(
+            hwnd,
+            wide(if quick {
+                "Quick Note - My Tools"
+            } else {
+                "Prompt Notes - My Tools"
+            })
+            .as_ptr(),
+        );
+        let primary =
+            windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, PASTE_ID as i32);
+        let secondary =
+            windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, COPY_ID as i32);
+        let hint = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, 3106);
+        SetWindowTextW(
+            primary,
+            wide(if quick { "Save Note" } else { "Paste to AI" }).as_ptr(),
+        );
+        SetWindowTextW(
+            secondary,
+            wide(if quick { "Notes Folder" } else { "Copy only" }).as_ptr(),
+        );
+        SetWindowTextW(
+            hint,
+            wide(if quick {
+                "Ctrl+S: Save note  |  Double-click a saved note to reopen  |  Esc: Hide"
+            } else {
+                "Ctrl+Enter: Paste  |  Ctrl+S: Save draft  |  Esc: Hide"
+            })
+            .as_ptr(),
+        );
+        let list = SAVED_LIST.load(Ordering::Relaxed) as HWND;
+        if !list.is_null() {
+            ShowWindow(list, if quick { SW_SHOW } else { SW_HIDE });
+        }
+        let mut bounds: windows_sys::Win32::Foundation::RECT = zeroed();
+        windows_sys::Win32::UI::WindowsAndMessaging::GetClientRect(hwnd, &mut bounds);
+        layout(hwnd, bounds.right - bounds.left, bounds.bottom - bounds.top);
+    }
+    if quick {
+        refresh_saved_notes();
     }
 }
 
@@ -261,11 +409,19 @@ pub fn handle_key(hwnd: HWND, message: u32, key: usize) -> bool {
             true
         }
         VK_RETURN if unsafe { GetKeyState(VK_CONTROL as i32) } < 0 => {
-            paste_to_previous();
+            if is_quick() {
+                save_quick_note()
+            } else {
+                paste_to_previous()
+            }
             true
         }
         VK_S if unsafe { GetKeyState(VK_CONTROL as i32) } < 0 => {
-            save_draft();
+            if is_quick() {
+                save_quick_note()
+            } else {
+                save_draft()
+            }
             true
         }
         _ => false,
@@ -278,7 +434,20 @@ fn layout(hwnd: HWND, width: i32, height: i32) {
         if edit.is_null() {
             return;
         }
-        MoveWindow(edit, 14, 14, (width - 28).max(1), (height - 112).max(90), 1);
+        let quick = is_quick();
+        let edit_bottom = if quick { height - 222 } else { height - 112 };
+        MoveWindow(edit, 14, 14, (width - 28).max(1), edit_bottom.max(90), 1);
+        let list = SAVED_LIST.load(Ordering::Relaxed) as HWND;
+        if !list.is_null() && quick {
+            MoveWindow(
+                list,
+                14,
+                (height - 195).max(105),
+                (width - 28).max(1),
+                108,
+                1,
+            );
+        }
         for (id, index) in [(PASTE_ID, 0), (COPY_ID, 1), (CLOSE_ID, 2)] {
             let child = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, id as i32);
             MoveWindow(child, 14 + index * 126, height - 82, 118, 34, 1);
@@ -295,10 +464,24 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             let notification = ((wparam >> 16) & 0xffff) as u32;
             if id == EDIT_ID && notification == EN_CHANGE {
                 SetTimer(hwnd, TIMER_SAVE, 700, None);
+            } else if id == SAVED_ID && notification == LBN_DBLCLK {
+                open_saved_note();
             } else if notification == BN_CLICKED {
                 match id {
-                    PASTE_ID => paste_to_previous(),
-                    COPY_ID => copy_only(),
+                    PASTE_ID => {
+                        if is_quick() {
+                            save_quick_note()
+                        } else {
+                            paste_to_previous()
+                        }
+                    }
+                    COPY_ID => {
+                        if is_quick() {
+                            open_quick_notes_folder()
+                        } else {
+                            copy_only()
+                        }
+                    }
                     CLOSE_ID => hide(),
                     _ => {}
                 }
@@ -330,6 +513,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             KillTimer(hwnd, TIMER_SAVE);
             POPUP.store(0, Ordering::Relaxed);
             EDIT.store(0, Ordering::Relaxed);
+            SAVED_LIST.store(0, Ordering::Relaxed);
             0
         }
         _ => DefWindowProcW(hwnd, msg, wparam, lparam),
@@ -395,6 +579,24 @@ unsafe fn create_popup() -> HWND {
         return null_mut();
     }
     EDIT.store(edit as isize, Ordering::Relaxed);
+    let saved = CreateWindowExW(
+        WS_EX_CLIENTEDGE,
+        wide("LISTBOX").as_ptr(),
+        null(),
+        WS_CHILD | WS_VSCROLL | WS_TABSTOP | LBS_NOTIFY as u32,
+        14,
+        180,
+        540,
+        108,
+        hwnd,
+        SAVED_ID as *mut _,
+        null_mut(),
+        null(),
+    );
+    if !saved.is_null() {
+        SAVED_LIST.store(saved as isize, Ordering::Relaxed);
+        SendMessageW(saved, WM_SETFONT, font as usize, 1);
+    }
     SendMessageW(edit, WM_SETFONT, font as usize, 1);
     SendMessageW(
         edit,

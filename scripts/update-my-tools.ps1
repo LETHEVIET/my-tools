@@ -1,5 +1,5 @@
-# Embedded in my-tools.exe. This helper runs only during GitHub update checks.
-# The distributable contains one executable, not a separate updater script.
+# Embedded in my-tools.exe. Public GitHub release updater, no gh or auth needed.
+# Distributed as part of the EXE, and written to a temp file only when checking.
 param(
     [Parameter(Mandatory=$true)][string]$Repo,
     [Parameter(Mandatory=$true)][string]$CurrentVersion,
@@ -13,6 +13,7 @@ $dataDir = Join-Path $env:LOCALAPPDATA 'MyTools'
 $stage = Join-Path $dataDir 'update-staging'
 $logFile = Join-Path $dataDir 'update.log'
 $binaryName = 'my-tools.exe'
+$expectedRepo = 'LETHEVIET/my-tools'
 
 function Log([string]$message) {
     Add-Content -LiteralPath $logFile -Value "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') $message"
@@ -20,16 +21,17 @@ function Log([string]$message) {
 }
 
 function RunUpdate {
-    if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
-        throw 'Install GitHub CLI and run gh auth login to update this private app.'
-    }
+    if ($Repo -ne $expectedRepo) { throw 'Unrecognized update repository.' }
     $installedExe = Join-Path $InstallDir $binaryName
     if (-not (Test-Path -LiteralPath $installedExe)) {
         throw 'The installed my-tools.exe was not found.'
     }
-    $tag = (& gh release view --repo $Repo --json tagName --jq '.tagName' 2>&1 | Out-String).Trim()
-    if ($LASTEXITCODE -ne 0) { throw "Cannot read private release: $tag" }
-    if ($tag -notmatch '^v(\d+)\.(\d+)\.(\d+)$') { throw "Unexpected version: $tag" }
+
+    # GitHub Releases API is readable over HTTPS without a GitHub account.
+    $headers = @{ 'User-Agent' = 'MyTools-Windows-Updater'; 'Accept' = 'application/vnd.github+json' }
+    $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$expectedRepo/releases/latest" -Headers $headers -TimeoutSec 25
+    $tag = [string]$release.tag_name
+    if ($tag -notmatch '^v(\d+)\.(\d+)\.(\d+)$') { throw "Unexpected release version: $tag" }
     if ([version]$tag.Substring(1) -le [version]$CurrentVersion) {
         Log "Up to date ($CurrentVersion)."
         return
@@ -50,26 +52,32 @@ public static class MyToolsNative {
         return
     }
 
-    Log "Downloading $tag..."
+    $asset = @($release.assets | Where-Object { $_.name -eq $binaryName }) | Select-Object -First 1
+    $checksum = @($release.assets | Where-Object { $_.name -eq 'SHA256SUMS.txt' }) | Select-Object -First 1
+    if (-not $asset -or -not $checksum) { throw 'Release is missing the EXE or checksum asset.' }
+    $assetRoot = "https://github.com/$expectedRepo/releases/download/$tag/"
+    if (-not ([string]$asset.browser_download_url).StartsWith($assetRoot, [StringComparison]::Ordinal) -or
+        -not ([string]$checksum.browser_download_url).StartsWith($assetRoot, [StringComparison]::Ordinal)) {
+        throw 'Release asset URLs did not match the trusted repository.'
+    }
+
+    Log "Downloading $tag over HTTPS..."
     if (Test-Path $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }
     New-Item -ItemType Directory -Path $stage -Force | Out-Null
-    & gh release download $tag --repo $Repo --dir $stage --pattern $binaryName --pattern 'SHA256SUMS.txt' --clobber
-    if ($LASTEXITCODE -ne 0) { throw 'Release download failed.' }
     $downloaded = Join-Path $stage $binaryName
     $hashFile = Join-Path $stage 'SHA256SUMS.txt'
-    if (-not (Test-Path $downloaded) -or -not (Test-Path $hashFile)) {
-        throw 'Release executable or checksum is missing.'
-    }
+    Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $downloaded -Headers $headers -MaximumRedirection 10 -TimeoutSec 180 -UseBasicParsing
+    Invoke-WebRequest -Uri $checksum.browser_download_url -OutFile $hashFile -Headers $headers -MaximumRedirection 10 -TimeoutSec 30 -UseBasicParsing
     $expectedLine = Get-Content $hashFile | Where-Object { $_ -match '^[a-fA-F0-9]{64}\s+my-tools\.exe$' } | Select-Object -First 1
-    if (-not $expectedLine) { throw 'Could not find the SHA256SUMS.txt entry for my-tools.exe.' }
+    if (-not $expectedLine) { throw 'Could not find the checksum for my-tools.exe.' }
     $expected = $expectedLine.Substring(0,64).ToUpperInvariant()
     $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $downloaded).Hash
-    if ($expected -ne $actual) { throw 'SHA-256 verification failed: refusing the downloaded executable.' }
+    if ($expected -ne $actual) { throw 'SHA-256 mismatch: refusing the downloaded executable.' }
 
     if ($AgentPid -le 0) { throw 'Missing running process ID.' }
     $tray = [MyToolsNative]::FindWindow('MyToolsAgentWin32', $null)
     if ($tray -eq [IntPtr]::Zero) { throw 'My Tools tray was not found; update deferred.' }
-    # WM_APP + 43 requests a graceful shutdown of the entire My Tools process.
+    # WM_APP + 43 gracefully closes the entire My Tools process.
     if (-not [MyToolsNative]::PostMessage($tray, 0x802B, [IntPtr]::Zero, [IntPtr]::Zero)) {
         throw 'Could not request a graceful My Tools shutdown.'
     }

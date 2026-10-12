@@ -13,6 +13,7 @@ use windows_sys::Win32::Foundation::{
 use windows_sys::Win32::System::DataExchange::{
     CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData,
 };
+use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
 use windows_sys::Win32::System::Ole::CF_DIB;
 use windows_sys::Win32::System::Registry::{
@@ -49,10 +50,13 @@ const ROTATE: usize = 1003;
 const AUTOSTART: usize = 1004;
 const EXIT: usize = 1005;
 const OPEN_NOTES: usize = 1006;
+const OPEN_QUICK_NOTE: usize = 1010;
 const CHECK_UPDATES: usize = 1007;
 const AUTO_UPDATES: usize = 1008;
 const NOTES_HOTKEY_ID: i32 = 771;
+const QUICK_HOTKEY_ID: i32 = 772;
 pub const WM_OPEN_NOTES: u32 = WM_APP + 42;
+pub const WM_OPEN_QUICK_NOTE: u32 = WM_APP + 44;
 const WM_APP_EXIT: u32 = WM_APP + 43;
 const RUN_PATH: &str = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
 const RUN_NAME: &str = "MyTools";
@@ -70,7 +74,13 @@ pub fn exiting() -> bool {
 
 pub fn another_instance_running() -> bool {
     unsafe {
-        let handle = CreateMutexW(null(), 0, wide("Local\\MyToolsSingleInstance").as_ptr());
+        // Test processes use an isolated mutex, leaving the user's real tray
+        // application untouched during Windows GUI integration tests.
+        let mutex = match std::env::var("MY_TOOLS_TEST_INSTANCE_ID") {
+            Ok(id) if !id.is_empty() => format!("Local\\MyToolsSingleInstance-test-{id}"),
+            _ => "Local\\MyToolsSingleInstance".to_owned(),
+        };
+        let handle = CreateMutexW(null(), 0, wide(&mutex).as_ptr());
         if handle.is_null() {
             return false;
         }
@@ -82,8 +92,15 @@ pub fn another_instance_running() -> bool {
     }
 }
 
+pub fn hub_title() -> String {
+    match std::env::var("MY_TOOLS_TEST_INSTANCE_ID") {
+        Ok(id) if !id.is_empty() => format!("My Tools [test-{id}]"),
+        _ => "My Tools".to_owned(),
+    }
+}
+
 fn hub_window() -> HWND {
-    unsafe { FindWindowW(null(), wide("My Tools").as_ptr()) }
+    unsafe { FindWindowW(null(), wide(&hub_title()).as_ptr()) }
 }
 
 pub fn show_hub() {
@@ -257,7 +274,16 @@ fn notify_icon(hwnd: HWND, add: bool) -> bool {
     icon.uID = 1;
     icon.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
     icon.uCallbackMessage = TRAY_CALLBACK;
-    icon.hIcon = unsafe { LoadIconW(null_mut(), IDI_APPLICATION) };
+    // The desktop build embeds its real icon as Windows resource #1.
+    // Standalone native-agent test builds keep the standard system fallback.
+    icon.hIcon = unsafe {
+        let embedded = LoadIconW(GetModuleHandleW(null()), 1usize as *const u16);
+        if embedded.is_null() {
+            LoadIconW(null_mut(), IDI_APPLICATION)
+        } else {
+            embedded
+        }
+    };
     let tip = wide("My Tools - Background Agent");
     icon.szTip[..tip.len()].copy_from_slice(&tip);
     unsafe { Shell_NotifyIconW(if add { NIM_ADD } else { NIM_DELETE }, &icon) != 0 }
@@ -290,6 +316,12 @@ fn menu(hwnd: HWND) {
             MF_STRING,
             OPEN_NOTES,
             wide("Prompt Notes   Ctrl+Alt+P").as_ptr(),
+        );
+        AppendMenuW(
+            menu,
+            MF_STRING,
+            OPEN_QUICK_NOTE,
+            wide("Quick Note   Ctrl+Alt+N").as_ptr(),
         );
         AppendMenuW(
             menu,
@@ -335,11 +367,19 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             0
         }
         WM_HOTKEY if wparam == NOTES_HOTKEY_ID as usize => {
-            notes::show(hwnd, true);
+            notes::show(hwnd, true, false);
+            0
+        }
+        WM_HOTKEY if wparam == QUICK_HOTKEY_ID as usize => {
+            notes::show(hwnd, true, true);
             0
         }
         WM_OPEN_NOTES => {
-            notes::show(hwnd, false);
+            notes::show(hwnd, false, false);
+            0
+        }
+        WM_OPEN_QUICK_NOTE => {
+            notes::show(hwnd, false, true);
             0
         }
         WM_APP_EXIT => {
@@ -351,7 +391,8 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             match wparam & 0xFFFF {
                 SHOW_HUB => show_hub(),
                 SHOW => show_pairing(),
-                OPEN_NOTES => notes::show(hwnd, false),
+                OPEN_NOTES => notes::show(hwnd, false, false),
+                OPEN_QUICK_NOTE => notes::show(hwnd, false, true),
                 CHECK_UPDATES => {
                     if let Err(message) = update::check_now(true) {
                         error_dialog(&message);
@@ -397,6 +438,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         WM_DESTROY => {
             notes::shutdown();
             UnregisterHotKey(hwnd, NOTES_HOTKEY_ID);
+            UnregisterHotKey(hwnd, QUICK_HOTKEY_ID);
             notify_icon(hwnd, false);
             WINDOW.store(0, Ordering::Relaxed);
             PostQuitMessage(0);
@@ -450,6 +492,15 @@ pub fn run_tray(state: Arc<State>, port: u16, show: bool) -> Result<(), String> 
         ) == 0
         {
             error_dialog("Ctrl+Alt+P is already in use. Prompt Notes is still available from the tray menu or My Tools desktop hub.");
+        }
+        if RegisterHotKey(
+            hwnd,
+            QUICK_HOTKEY_ID,
+            MOD_CONTROL | MOD_ALT | MOD_NOREPEAT,
+            'N' as u32,
+        ) == 0
+        {
+            error_dialog("Ctrl+Alt+N is already in use. Quick Note is still available from the tray menu or the My Tools hub.");
         }
         if show {
             show_pairing();

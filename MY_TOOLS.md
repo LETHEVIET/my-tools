@@ -2,9 +2,18 @@
 
 **Since v0.4.0 My Tools distributes exactly one executable:** `my-tools.exe`. It opens the GPUI Kit dashboard when double-clicked. Closing the window hides to the system tray; double-click the tray icon to reopen. The HTTP image receiver and global Prompt Notes hotkey operate on background threads in the same process. Choose **Exit My Tools** in the tray menu to stop it. `my-tools.exe --minimized` launches directly into the tray. The native Rust modules remain separate in source for maintainability, but are linked into the **same executable**.
 
-The download is the executable alone; no second EXE, ZIP unpacking, or installer script is required. Optionally click **Install My Tools** inside the app to copy itself to `%LOCALAPPDATA%\Programs\MyTools` and enable tray startup and private GitHub updates. See [UPDATE_GUIDE.md](UPDATE_GUIDE.md).
+The dashboard now uses GPUI Kit's default-theme **Sidebar** shell, with pages for
+Overview, each tool, **Saved Notes** and Settings. Saved Notes displays your
+recent Quick Notes on the left and a read-only full note preview on the right.
+Use **Refresh** after saving another note, or **Open folder** for the original
+UTF-8 files. The hub never needs to send stored note contents over HTTP.
+The SVG logo source is `desktop/assets/my-tools.svg`; generated
+`desktop/assets/my-tools.ico` is included as an EXE resource and in the tray.
+The same artwork supplies the iPhone home-screen icons.
 
-**GitHub CI/CD and the release updater:** see [UPDATE_GUIDE.md](UPDATE_GUIDE.md). The source repository is private and the installable release uses automatic version checks, without leaving a GitHub subprocess running.
+The download is the executable alone; no second EXE, ZIP unpacking, or installer script is required. Optionally click **Install My Tools** inside the app to copy itself to `%LOCALAPPDATA%\Programs\MyTools` and enable tray startup and public GitHub HTTPS updates. See [UPDATE_GUIDE.md](UPDATE_GUIDE.md).
+
+**GitHub CI/CD and the release updater:** see [UPDATE_GUIDE.md](UPDATE_GUIDE.md). The source repository and release downloads are public. The installed app checks for updates over HTTPS without GitHub CLI or authentication.
 
 **My Tools** is a growing collection of utilities for Windows and iPhone. This is the **application name**, not the name of an individual utility. The first tool is **Snap to Paste Image**: snap or select an iPhone image and paste it automatically into the focused Windows prompt. The second is **Prompt Notes**, a quick Windows scratchpad for composing longer prompts before pasting them into your AI assistant.
 
@@ -34,6 +43,12 @@ Drafts auto-save while typing and are restored after restarting Windows. They li
 If Ctrl+Alt+P conflicts with another app, the receiver displays a warning and the **Prompt Notes** tray menu still works. Windows may prevent simulated Ctrl+V in elevated apps or if the previous window disappeared; in that case, the text remains on the clipboard for manual pasting. If you close the note without pasting, your draft remains saved.
 
 The hub uses GPUI Kit's built-in default theme. Prompt Notes uses Windows' native dialog controls. With one EXE and one process, GPUI remains loaded when the hub is hidden; that costs more idle memory than the old agent-only process, but simplifies installation and operation.
+
+## Quick Note — save without pasting
+
+Press **Ctrl+Alt+N** anywhere on Windows, type your note, then press **Ctrl+S** (or click **Save Note**) to save and hide the popup. Unlike Prompt Notes, **Quick Note never writes to your clipboard or sends Ctrl+V**. Each saved note becomes its own UTF-8 `.txt` file in `%LOCALAPPDATA%\MyTools\quick-notes\`, and the popup shows your most recent notes; double-click one to load it back for editing or saving as a new note. **Notes Folder** opens the local collection in File Explorer.
+
+Close the window with **Esc** to keep an unsaved Quick Note as a separate, auto-saved draft. You can return later without losing it. Saved Quick Notes and the Prompt Notes draft remain separate. Everything is stored locally, unencrypted, so don't put passwords or secrets in them. The native popup works even when the GPUI hub is hidden in the system tray.
 
 ## App layout
 

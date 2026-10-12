@@ -1,9 +1,5 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
-use gpui_kit::base::StyledExt as _;
-use gpui_kit::component::button::{Button, ButtonVariants};
-use gpui_kit::component::ActiveTheme as _;
-use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use std::net::{SocketAddr, TcpStream};
 use std::process::Command;
@@ -19,6 +15,9 @@ mod install;
 #[cfg(windows)]
 #[path = "../../rust/src/notes.rs"]
 mod notes;
+#[cfg(windows)]
+#[path = "../../rust/src/quick_notes_store.rs"]
+mod quick_notes_store;
 #[cfg(windows)]
 #[path = "../../rust/src/receiver.rs"]
 mod receiver;
@@ -47,7 +46,7 @@ fn pairing_url() -> String {
 }
 
 #[cfg(windows)]
-fn open_prompt_notes() -> Result<&'static str, String> {
+fn open_notes(quick: bool) -> Result<&'static str, String> {
     use windows_sys::Win32::UI::WindowsAndMessaging::{FindWindowW, PostMessageW, WM_APP};
     let classname: Vec<u16> = "MyToolsAgentWin32".encode_utf16().chain(Some(0)).collect();
     // The receiver starts almost instantly, but allow a brief moment for its
@@ -56,10 +55,14 @@ fn open_prompt_notes() -> Result<&'static str, String> {
         unsafe {
             let hwnd = FindWindowW(classname.as_ptr(), std::ptr::null());
             if !hwnd.is_null() {
-                if PostMessageW(hwnd, WM_APP + 42, 0, 0) == 0 {
+                if PostMessageW(hwnd, WM_APP + if quick { 44 } else { 42 }, 0, 0) == 0 {
                     return Err("Could not open Prompt Notes. Try Ctrl+Alt+P.".into());
                 }
-                return Ok("Prompt Notes opened. Use Ctrl+Alt+P while an AI prompt is focused for paste-back.");
+                return Ok(if quick {
+                    "Quick Note opened. Ctrl+S saves a new local note, without pasting."
+                } else {
+                    "Prompt Notes opened. Use Ctrl+Alt+P while an AI prompt is focused for paste-back."
+                });
             }
         }
         std::thread::sleep(Duration::from_millis(100));
@@ -68,7 +71,7 @@ fn open_prompt_notes() -> Result<&'static str, String> {
 }
 
 #[cfg(not(windows))]
-fn open_prompt_notes() -> Result<&'static str, String> {
+fn open_notes(_quick: bool) -> Result<&'static str, String> {
     Err("Prompt Notes currently requires Windows.".into())
 }
 
@@ -87,168 +90,8 @@ fn open_browser(_url: &str) -> Result<(), String> {
     Err("Desktop launcher currently targets Windows".into())
 }
 
-struct Hub {
-    status: String,
-}
-
-impl Hub {
-    fn new() -> Self {
-        Self {
-            status: "Ready".into(),
-        }
-    }
-
-    fn show_pairing(&mut self, cx: &mut Context<Self>) {
-        if !receiver_online() {
-            self.status = "Start the receiver first, then open the pairing QR.".into();
-        } else {
-            self.status = match open_browser(&pairing_url()) {
-                Ok(()) => "Opened the pairing QR in your default browser.".into(),
-                Err(error) => error,
-            };
-        }
-        cx.notify();
-    }
-
-    fn show_prompt_notes(&mut self, cx: &mut Context<Self>) {
-        self.status = match open_prompt_notes() {
-            Ok(message) => message.into(),
-            Err(message) => message,
-        };
-        cx.notify();
-    }
-
-    #[cfg(windows)]
-    fn install(&mut self, cx: &mut Context<Self>) {
-        self.status = match install::install() {
-            Ok(message) => message,
-            Err(message) => message,
-        };
-        cx.notify();
-    }
-}
-
-impl Render for Hub {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let online = receiver_online();
-        let theme = cx.theme();
-
-        div()
-            .size_full()
-            .flex()
-            .flex_col()
-            .bg(theme.background)
-            .text_color(theme.foreground)
-            .p_8()
-            .gap_6()
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .child(div().text_2xl().font_bold().child("My Tools"))
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(theme.muted_foreground)
-                            .child("A lightweight collection of tools for your devices."),
-                    ),
-            )
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .p_6()
-                    .gap_4()
-                    .rounded_lg()
-                    .border_1()
-                    .border_color(theme.border)
-                    .bg(theme.secondary)
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .child(
-                                div()
-                                    .flex()
-                                    .flex_col()
-                                    .gap_2()
-                                    .child(
-                                        div()
-                                            .text_lg()
-                                            .font_bold()
-                                            .child("Snap to Paste Image"),
-                                    )
-                                    .child(
-                                        div()
-                                            .text_sm()
-                                            .text_color(theme.muted_foreground)
-                                            .child("iPhone photos directly into a focused Windows AI prompt"),
-                                    ),
-                            )
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .text_color(theme.muted_foreground)
-                                    .child(if online { "Receiver active" } else { "Receiver offline" }),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .gap_3()
-                            .child(
-                                Button::new("pair-image-tool")
-                                    .primary()
-                                    .label("Pair iPhone")
-                                    .on_click(cx.listener(|this, _, _, cx| this.show_pairing(cx))),
-                            )
-                            .child(
-                                Button::new("refresh-image-status")
-                                    .label("Refresh")
-                                    .on_click(cx.listener(|_, _, _, cx| cx.notify())),
-                            ),
-                    ),
-            )
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .p_6()
-                    .gap_2()
-                    .rounded_lg()
-                    .border_1()
-                    .border_color(theme.border)
-                    .child(div().font_bold().child("Prompt Notes"))
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(theme.muted_foreground)
-                            .child("A quick scratchpad for long AI prompts. Shortcut: Ctrl+Alt+P."),
-                    )
-                    .child(
-                        Button::new("open-prompt-notes")
-                            .primary()
-                            .label("Open Prompt Notes")
-                            .on_click(cx.listener(|this, _, _, cx| this.show_prompt_notes(cx))),
-                    ),
-            )
-            .child(
-                div()
-                    .text_sm()
-                    .text_color(theme.muted_foreground)
-                    .child(self.status.clone()),
-            )
-            .when(cfg!(windows) && !install::is_installed(), |element| {
-                element.child(
-                    Button::new("install-my-tools")
-                        .label("Install My Tools for startup and automatic updates")
-                        .on_click(cx.listener(|this, _, _, cx| this.install(cx))),
-                )
-            })
-    }
-}
+mod hub;
+use hub::Hub;
 
 fn main() {
     #[cfg(windows)]
@@ -287,7 +130,7 @@ fn main() {
         init(cx);
         let options = WindowOptions {
             titlebar: Some(TitlebarOptions {
-                title: Some("My Tools".into()),
+                title: Some(win::hub_title().into()),
                 ..Default::default()
             }),
             show: !initially_hidden,

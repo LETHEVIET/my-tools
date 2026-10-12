@@ -10,6 +10,8 @@ mod agent;
 #[cfg(windows)]
 mod notes;
 #[cfg(windows)]
+mod quick_notes_store;
+#[cfg(windows)]
 mod receiver;
 #[cfg(windows)]
 mod tools;

@@ -1,6 +1,6 @@
 [package]
 name = "my-tools-agent"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 description = "My Tools lightweight Windows background agent"
 
@@ -24,6 +24,7 @@ windows-sys = { version = "0.61", features = [
     "Win32_UI_WindowsAndMessaging",
     "Win32_System_Threading",
     "Win32_Security",
+    "Win32_System_LibraryLoader",
 ] }
 
 [profile.release]

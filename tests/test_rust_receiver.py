@@ -64,6 +64,7 @@ class RustReceiverTests(unittest.TestCase):
                 self.assertEqual(status, 200)
                 self.assertEqual(json.loads(tools)["tools"][0]["id"], "snap-to-paste-image")
                 self.assertEqual(json.loads(tools)["tools"][1]["id"], "prompt-notes")
+                self.assertEqual(json.loads(tools)["tools"][2]["id"], "quick-note")
                 status, tool = request("/tools/snap-to-paste-image/")
                 self.assertEqual(status, 200)
                 self.assertIn(b"libraryInput", tool)
