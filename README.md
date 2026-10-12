@@ -8,13 +8,21 @@ Quick Notes without changing the clipboard. The app's icon is embedded in
 `my-tools.exe` and shown in the tray, and the iPhone launcher uses matching
 icons. The editable vector source is `desktop/assets/my-tools.svg`.
 
+The main window opens in a more compact **860 × 590** layout. Both notes tools
+now open a small **GPUI Kit themed text editor** instead of a separate Win32
+text-controls dialog. **Ctrl+S saves a new item to Saved Notes and closes**
+either editor. Prompt Notes also preserves its reusable working draft.
+**Ctrl+Enter** pastes Prompt Notes back to the previous app (never submits).
+The iPhone **pairing QR is drawn directly in the desktop Photo tool page**, so
+Windows doesn't open a browser to display it.
+
 **One executable — `my-tools.exe`.** Double-click to show the desktop hub; close the window to hide to the system tray. Double-click the tray icon to show it again; choose **Exit My Tools** to quit. Image upload, clipboard pasting, and Prompt Notes hotkeys continue to run while the hub is hidden, all within the **same process**.
 
 ## Tools
 
 - **Snap to Paste Image:** take or select iPhone photos and paste them directly into the focused Windows AI prompt.
-- **Prompt Notes:** press **Ctrl+Alt+P** to compose a longer prompt, then **Ctrl+Enter** to paste back into the prior app. Notes auto-save locally.
-- **Quick Note:** press **Ctrl+Alt+N** to capture an idea. Use **Save Note** or **Ctrl+S** to store it in your local notes collection without copying or pasting anything. Double-click a saved note in the popup to reopen it.
+- **Prompt Notes:** press **Ctrl+Alt+P** to compose a longer prompt, then **Ctrl+Enter** to paste back into the prior app. Notes auto-save locally; **Ctrl+S** saves and closes.
+- **Quick Note:** press **Ctrl+Alt+N** to capture an idea. Use **Save Note** or **Ctrl+S** to save a separate local note and close the popup, without copying or pasting anything. Find saved notes in the **Saved Notes** sidebar page.
 
 You can also open **Saved Notes** from the left sidebar and select any note to
 read it in full, or choose **Open folder** to work with the underlying plain

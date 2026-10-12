@@ -96,6 +96,14 @@ class SingleAppTrayTest(unittest.TestCase):
                 self.assertEqual(duplicate.wait(timeout=8), 0)
                 until(lambda: user32.IsWindowVisible(hub))
 
+                # Pairing is displayed in the existing GPUI dashboard, not
+                # a browser. The tray command must reveal the hidden hub.
+                self.assertTrue(user32.PostMessageW(hub, 0x0010, 0, 0))
+                until(lambda: not user32.IsWindowVisible(hub))
+                self.assertTrue(user32.PostMessageW(tray, 0x0111, 1001, 0))  # Show pairing QR
+                until(lambda: user32.IsWindowVisible(hub))
+                self.assertIsNone(proc.poll())
+
                 # True exit cleans up the tray and exits the one process.
                 self.assertTrue(user32.PostMessageW(tray, 0x0111, 1005, 0))  # WM_COMMAND / Exit
                 self.assertEqual(proc.wait(timeout=10), 0)

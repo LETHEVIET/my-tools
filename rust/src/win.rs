@@ -67,6 +67,19 @@ static PORT: OnceLock<u16> = OnceLock::new();
 static WINDOW: AtomicIsize = AtomicIsize::new(0);
 static INSTANCE: AtomicIsize = AtomicIsize::new(0);
 static EXITING: AtomicBool = AtomicBool::new(false);
+static GPUI_PAIR: OnceLock<fn()> = OnceLock::new();
+
+pub fn register_gpui_pairing(handler: fn()) {
+    let _ = GPUI_PAIR.set(handler);
+}
+
+pub fn pairing_url() -> Option<String> {
+    STATE.get().map(|state| state.pairing_url())
+}
+
+pub fn clipboard_owner() -> HWND {
+    WINDOW.load(Ordering::Relaxed) as HWND
+}
 
 pub fn exiting() -> bool {
     EXITING.load(Ordering::Relaxed)
@@ -253,6 +266,10 @@ fn toggle_start_on_login() -> Result<(), String> {
 }
 
 fn show_pairing() {
+    if let Some(show) = GPUI_PAIR.get() {
+        show();
+        return;
+    }
     let port = *PORT.get().expect("tray port initialized");
     let link = wide(&format!("http://127.0.0.1:{port}/pair"));
     unsafe {

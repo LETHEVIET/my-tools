@@ -12,7 +12,7 @@ On Windows, install Rust using [rustup](https://rustup.rs/) with the MSVC toolch
 
 1. Double-click `build_windows.bat` once. It builds **`desktop\target\release\my-tools.exe`**.
 2. Double-click `start_windows.bat` to start My Tools hidden in the notification area, or `start_hub_windows.bat` to open the dashboard.
-3. On first launch, your browser opens the pairing QR page. On later launches, **double-click the tray icon** or right-click it and choose **Show pairing QR**.
+3. On first launch, the My Tools desktop window shows the pairing QR **inside the app**. On later launches, right-click the tray icon and choose **Show pairing QR** to reopen the QR page inside My Tools; no Windows browser tab is needed.
 4. Scan the QR with your iPhone Camera app, open the link in Safari, and bookmark it for future snaps.
 5. Focus the AI prompt on your Windows PC. **Library** lets you select one or more photos, which paste to the PC in order. On the usual local HTTP link, the round shutter opens the iPhone's native camera picker; confirm **Use Photo** to paste. It does **not** submit your AI prompt.
 
@@ -52,7 +52,7 @@ If you change the PC's local IP or switch from the Python receiver to Rust, resc
 - Standard-library sockets via `tiny_http`; simple HTTP requests, no always-on WebRTC or WebSocket connection.
 - No GUI framework, Python interpreter, WebView, Electron, or Node runtime.
 - The iPhone's HTML/JS/CSS/icons are embedded in the release executable. The server stays idle between HTTP requests.
-- The first launch opens a normal browser for QR pairing; closing that tab does not close the receiver.
+- The main GPUI Kit dashboard renders the pairing QR directly, with no Windows browser needed to display it.
 - One-file portable `.exe` in `rust\target\release`, not a PyInstaller unpack-at-start EXE.
 
 Rust compilation is required **only for building**; the resulting executable can be copied to another Windows computer. The Rust toolchain is not needed on the destination PC. For use on startup, keep the executable in its final location before enabling **Start with Windows**.

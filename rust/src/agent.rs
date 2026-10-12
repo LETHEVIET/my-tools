@@ -3,6 +3,8 @@
 use crate::{receiver, win};
 
 pub fn run() -> Result<(), String> {
+    let startup_hidden =
+        std::env::args().any(|arg| arg == "--minimized" || arg == "--headless-test");
     let mut port = 8765u16;
     let mut host: Option<String> = None;
     let mut public_url: Option<String> = None;
@@ -42,6 +44,8 @@ pub fn run() -> Result<(), String> {
         .name("photo-receiver".to_owned())
         .spawn(move || receiver::serve(http, running))
         .map_err(|error| error.to_string())?;
-    let show = show || state.first_run;
+    // Explicit tray/headless startup must not unexpectedly pop the dashboard.
+    // Normal first-run startup still guides the user to the in-app pairing QR.
+    let show = show || (state.first_run && !startup_hidden);
     win::run_tray(state, port, show)
 }

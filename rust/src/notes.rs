@@ -48,6 +48,13 @@ static TARGET: AtomicIsize = AtomicIsize::new(0);
 static QUICK_MODE: AtomicBool = AtomicBool::new(false);
 static SAVED_LIST: AtomicIsize = AtomicIsize::new(0);
 static SAVED_PATHS: OnceLock<Mutex<Vec<PathBuf>>> = OnceLock::new();
+// The GPUI desktop app registers this handler. The standalone Rust test
+// receiver can still use the legacy Win32 notes popup.
+static GPUI_OPEN: OnceLock<fn(bool)> = OnceLock::new();
+
+pub fn register_gpui_open(handler: fn(bool)) {
+    let _ = GPUI_OPEN.set(handler);
+}
 
 fn is_quick() -> bool {
     QUICK_MODE.load(Ordering::Relaxed)
@@ -108,6 +115,28 @@ fn save_text_to(path: &std::path::Path, text: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn gpui_draft_path(quick: bool) -> Result<PathBuf, String> {
+    let profile = std::env::var_os("LOCALAPPDATA")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .ok_or("Cannot locate Windows user profile")?;
+    Ok(PathBuf::from(profile).join("MyTools").join(if quick {
+        "quick-note-draft.txt"
+    } else {
+        "prompt-notes.txt"
+    }))
+}
+
+pub fn load_gpui_draft(quick: bool) -> String {
+    gpui_draft_path(quick)
+        .ok()
+        .and_then(|path| fs::read_to_string(path).ok())
+        .unwrap_or_default()
+}
+
+pub fn save_gpui_draft(quick: bool, text: &str) -> Result<(), String> {
+    save_text_to(&gpui_draft_path(quick)?, text)
+}
+
 fn current_text() -> String {
     let edit = EDIT.load(Ordering::Relaxed) as HWND;
     if edit.is_null() {
@@ -150,7 +179,24 @@ pub fn shutdown() {
 
 pub fn is_popup_foreground() -> bool {
     let popup = POPUP.load(Ordering::Relaxed) as HWND;
-    !popup.is_null() && unsafe { GetForegroundWindow() } == popup
+    let active = unsafe { GetForegroundWindow() };
+    if active.is_null() {
+        return false;
+    }
+    if !popup.is_null() && active == popup {
+        return true;
+    }
+    // The unified desktop app uses GPUI Kit windows rather than the legacy
+    // Win32 popup. Never auto-paste an incoming iPhone image into a note.
+    let mut title = [0u16; 96];
+    let len = unsafe { GetWindowTextW(active, title.as_mut_ptr(), title.len() as i32) };
+    if len <= 0 {
+        return false;
+    }
+    matches!(
+        String::from_utf16_lossy(&title[..len as usize]).as_str(),
+        "Quick Note - My Tools" | "Prompt Notes - My Tools"
+    )
 }
 
 pub fn show(tray: HWND, from_shortcut: bool, quick: bool) {
@@ -160,8 +206,12 @@ pub fn show(tray: HWND, from_shortcut: bool, quick: bool) {
     // text can be pasted back safely after the popup steals keyboard focus.
     if from_shortcut && previous != tray && previous != popup && !previous.is_null() {
         TARGET.store(previous as isize, Ordering::Relaxed);
-    } else if !from_shortcut || popup.is_null() {
+    } else if !from_shortcut {
         TARGET.store(0, Ordering::Relaxed);
+    }
+    if let Some(open) = GPUI_OPEN.get() {
+        open(quick);
+        return;
     }
     let was_quick = is_quick();
     if was_quick != quick && !popup.is_null() {
@@ -190,6 +240,64 @@ pub fn show(tray: HWND, from_shortcut: bool, quick: bool) {
             SetFocus(edit);
         }
     }
+}
+
+pub fn copy_gpui_text(text: &str) -> Result<(), String> {
+    if text.trim().is_empty() {
+        return Err("Write a prompt before pasting.".into());
+    }
+    let encoded = wide(text);
+    let size = encoded.len() * size_of::<u16>();
+    unsafe {
+        let data = GlobalAlloc(GMEM_MOVEABLE, size);
+        if data.is_null() {
+            return Err("Cannot allocate clipboard text".into());
+        }
+        let memory = GlobalLock(data);
+        if memory.is_null() {
+            GlobalFree(data);
+            return Err("Cannot lock clipboard memory".into());
+        }
+        std::ptr::copy_nonoverlapping(encoded.as_ptr().cast::<u8>(), memory.cast(), size);
+        GlobalUnlock(data);
+        if OpenClipboard(win::clipboard_owner()) == 0 {
+            GlobalFree(data);
+            return Err("Clipboard is busy".into());
+        }
+        if EmptyClipboard() == 0 || SetClipboardData(CF_UNICODETEXT as u32, data).is_null() {
+            CloseClipboard();
+            GlobalFree(data);
+            return Err("Could not copy prompt".into());
+        }
+        CloseClipboard();
+    }
+    Ok(())
+}
+
+/// Paste a GPUI editor's content to the application that held focus when
+/// Ctrl+Alt+P was pressed. Clipboard fallback remains available if Windows
+/// refuses to reactivate that window.
+pub fn paste_gpui_text(text: &str) -> Result<(), String> {
+    copy_gpui_text(text)?;
+    unsafe {
+        let target = TARGET.load(Ordering::Relaxed) as HWND;
+        if target.is_null() || IsWindow(target) == 0 {
+            return Err("Copied to clipboard; focus the AI input and press Ctrl+V.".into());
+        }
+        ShowWindow(target, SW_SHOW);
+        SetForegroundWindow(target);
+        std::thread::sleep(std::time::Duration::from_millis(90));
+        if GetForegroundWindow() != target {
+            return Err(
+                "Copied to clipboard; Windows couldn't restore the previous app. Paste manually."
+                    .into(),
+            );
+        }
+        if !win::send_paste_shortcut() {
+            return Err("Copied to clipboard; Ctrl+V was blocked. Paste manually.".into());
+        }
+    }
+    Ok(())
 }
 
 fn refresh_saved_notes() {

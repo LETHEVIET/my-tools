@@ -1,6 +1,6 @@
 //! My Tools application shell. Uses GPUI Kit's Sidebar, Button, Badge, Icon and
 //! built-in system theme rather than custom styling or a second UI runtime.
-use super::{install, open_browser, open_notes, pairing_url, quick_notes_store, receiver_online};
+use super::{install, open_notes, quick_notes_store, receiver_online, win};
 use gpui_kit::base::StyledExt as _;
 use gpui_kit::component::{
     badge::Badge,
@@ -10,6 +10,7 @@ use gpui_kit::component::{
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
+use qrcode::{Color, QrCode};
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -86,6 +87,11 @@ impl Hub {
         }
     }
 
+    pub(super) fn refresh_after_note_save(&mut self, cx: &mut Context<Self>) {
+        self.refresh_saved();
+        cx.notify();
+    }
+
     fn pick_note(&mut self, path: PathBuf, cx: &mut Context<Self>) {
         match std::fs::read_to_string(&path) {
             Ok(contents) => {
@@ -113,28 +119,32 @@ impl Hub {
     }
 
     fn show_pairing(&mut self, cx: &mut Context<Self>) {
-        self.status = if receiver_online() {
-            match open_browser(&pairing_url()) {
-                Ok(()) => "Pairing QR opened in your browser.".into(),
-                Err(error) => error,
-            }
+        self.show_pairing_page(cx);
+    }
+
+    pub(super) fn show_pairing_page(&mut self, cx: &mut Context<Self>) {
+        self.page = Page::Photo;
+        self.status = if win::pairing_url().is_some() {
+            "Scan the QR with your iPhone camera. Pairing stays inside My Tools.".into()
         } else {
-            "Image receiver unavailable. Check whether another process uses port 8765.".into()
+            "The receiver is starting. The pairing code will appear when it is ready.".into()
         };
         cx.notify();
     }
 
     fn open_prompt(&mut self, cx: &mut Context<Self>) {
-        self.status = open_notes(false)
-            .unwrap_or_else(|error| Box::leak(error.into_boxed_str()))
-            .into();
+        self.status = match open_notes(false) {
+            Ok(message) => message.into(),
+            Err(error) => error,
+        };
         cx.notify();
     }
 
     fn open_quick(&mut self, cx: &mut Context<Self>) {
-        self.status = open_notes(true)
-            .unwrap_or_else(|error| Box::leak(error.into_boxed_str()))
-            .into();
+        self.status = match open_notes(true) {
+            Ok(message) => message.into(),
+            Err(error) => error,
+        };
         cx.notify();
     }
 
@@ -147,7 +157,7 @@ impl Hub {
         let active = self.page;
         let collapsed = self.collapsed;
         Sidebar::new("my-tools-navigation")
-            .w(px(254.))
+            .w(px(212.))
             .collapsible(true)
             .collapsed(collapsed)
             .header(
@@ -157,7 +167,7 @@ impl Hub {
                         .items_center()
                         .gap_3()
                         .px_2()
-                        .py_4()
+                        .py_2()
                         .child(Icon::new(IconName::LayoutDashboard))
                         .when(!collapsed, |this| {
                             this.child(
@@ -281,9 +291,10 @@ impl Hub {
         let theme = cx.theme().clone();
         div()
             .flex()
-            .flex_col()
-            .gap_4()
-            .p_5()
+            .items_center()
+            .justify_between()
+            .gap_3()
+            .p_4()
             .rounded_xl()
             .border_1()
             .border_color(theme.border)
@@ -291,9 +302,9 @@ impl Hub {
             .child(
                 div()
                     .flex()
-                    .justify_between()
-                    .items_start()
-                    .gap_4()
+                    .flex_col()
+                    .min_w_0()
+                    .gap_1()
                     .child(
                         div()
                             .flex()
@@ -324,11 +335,65 @@ impl Hub {
             .child(button)
     }
 
+    fn pairing_qr(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = cx.theme().clone();
+        let Some(url) = win::pairing_url() else {
+            return div()
+                .text_sm()
+                .text_color(theme.muted_foreground)
+                .child("Starting the receiver…")
+                .into_any_element();
+        };
+        let Ok(qr) = QrCode::new(url.as_bytes()) else {
+            return div()
+                .text_sm()
+                .child("Could not encode pairing QR.")
+                .into_any_element();
+        };
+        let width = qr.width();
+        let cells = qr.to_colors();
+        let unit = if width > 55 { 4. } else { 5. };
+        div()
+            .rounded_xl()
+            .border_1()
+            .border_color(theme.border)
+            .p_4()
+            .flex()
+            .flex_col()
+            .items_center()
+            .gap_3()
+            .child(div().font_bold().child("Scan with your iPhone"))
+            .child(
+                div()
+                    .p_3()
+                    .rounded_lg()
+                    .bg(rgb(0xffffff))
+                    .flex()
+                    .flex_col()
+                    .children(cells.chunks(width).map(|line| {
+                        div().flex().children(line.iter().map(|cell| {
+                            div().w(px(unit)).h(px(unit)).bg(if *cell == Color::Dark {
+                                rgb(0x111827)
+                            } else {
+                                rgb(0xffffff)
+                            })
+                        }))
+                    })),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(theme.muted_foreground)
+                    .child("Opens Snap to Paste Image on your phone. Keep this code private."),
+            )
+            .into_any_element()
+    }
+
     fn page_content(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.theme().clone();
         match self.page {
             Page::Home => {
-                div().flex().flex_col().gap_5()
+                div().flex().flex_col().gap_3()
                     .child(div().flex().justify_between().items_center()
                         .child(div().text_sm().text_color(theme.muted_foreground).child("Available tools"))
                         .child(Badge::new().count(3)))
@@ -337,18 +402,17 @@ impl Hub {
                         IconName::FileText,
                         Button::new("home-pair").primary().label("Pair iPhone")
                             .on_click(cx.listener(|this, _, _, cx| this.show_pairing(cx))), cx))
-                    .child(div().flex().gap_4()
-                        .child(div().flex_1().child(self.tool_card("Prompt Notes",
+                    .child(self.tool_card("Prompt Notes",
                             "Prepare long prompts before pasting.", "Ctrl+Alt+P",
                             IconName::FileText,
                             Button::new("home-prompt").label("Open Prompt Notes")
-                                .on_click(cx.listener(|this, _, _, cx| this.open_prompt(cx))), cx)))
-                        .child(div().flex_1().child(self.tool_card("Quick Note",
+                                .on_click(cx.listener(|this, _, _, cx| this.open_prompt(cx))), cx))
+                    .child(self.tool_card("Quick Note",
                             "Save ideas without copying or pasting.", "Ctrl+Alt+N",
                             IconName::FileText,
                             Button::new("home-quick").label("Write a note")
-                                .on_click(cx.listener(|this, _, _, cx| this.open_quick(cx))), cx))))
-                    .child(div().p_5().rounded_xl().border_1().border_color(theme.border)
+                                .on_click(cx.listener(|this, _, _, cx| this.open_quick(cx))), cx))
+                    .child(div().p_4().rounded_xl().border_1().border_color(theme.border)
                         .flex().items_center().justify_between()
                         .child(div().flex().flex_col().gap_1()
                             .child(div().font_bold().child("Your saved notes"))
@@ -358,11 +422,13 @@ impl Hub {
                             .on_click(cx.listener(|this, _, _, cx| this.navigate(Page::Saved, cx)))))
                     .into_any_element()
             }
-            Page::Photo => self.tool_card("Snap to Paste Image",
+            Page::Photo => div().flex().flex_col().gap_3()
+                .child(self.tool_card("Snap to Paste Image",
                     "Your iPhone pairs to this Windows receiver. Focus an AI prompt, then capture an image on your phone.",
                     if receiver_online() { "Receiver online" } else { "Receiver unavailable" },
-                    IconName::FileText, Button::new("photo-pair").primary().label("Open pairing QR")
-                        .on_click(cx.listener(|this, _, _, cx| this.show_pairing(cx))), cx)
+                    IconName::FileText, Button::new("photo-pair").label("Refresh pairing QR")
+                        .on_click(cx.listener(|this, _, _, cx| this.show_pairing(cx))), cx))
+                .child(self.pairing_qr(cx))
                 .into_any_element(),
             Page::Prompt => self.tool_card("Prompt Notes",
                     "Ctrl+Alt+P opens your long-form prompt scratchpad anywhere. Ctrl+Enter pastes to the previous app.",
@@ -393,8 +459,8 @@ impl Hub {
                                 })))
                             .child(Button::new("saved-folder").label("Open folder")
                                 .on_click(cx.listener(|this, _, _, cx| this.open_notes_folder(cx))))))
-                    .child(div().flex().gap_4().min_h(px(360.))
-                        .child(div().w(px(300.)).flex_shrink_0().rounded_lg().border_1()
+                    .child(div().flex().gap_3().min_h(px(300.))
+                        .child(div().w(px(208.)).flex_shrink_0().rounded_lg().border_1()
                             .border_color(theme.border).p_3().gap_2().flex().flex_col()
                             .child(div().text_sm().font_bold().child("Recent notes"))
                             .child(div().id("saved-notes-scroll").flex_1().overflow_y_scroll()
@@ -411,7 +477,7 @@ impl Hub {
                                         .into_any_element()
                                 }))))
                         .child(div().flex_1().min_w_0().rounded_lg().border_1()
-                            .border_color(theme.border).p_5().flex().flex_col().gap_3()
+                            .border_color(theme.border).p_3().flex().flex_col().gap_3()
                             .child(div().font_bold().child("Note preview"))
                             .child(div().text_sm().text_color(theme.muted_foreground)
                                 .child("Select a note on the left to read it. Notes remain on your PC."))
@@ -465,16 +531,16 @@ impl Render for Hub {
                             .flex()
                             .items_center()
                             .justify_between()
-                            .px_8()
-                            .py_5()
+                            .px_5()
+                            .py_3()
                             .border_b_1()
                             .border_color(theme.border)
                             .child(
                                 div()
                                     .flex()
                                     .flex_col()
-                                    .gap_2()
-                                    .child(div().text_2xl().font_bold().child(self.page.heading()))
+                                    .gap_1()
+                                    .child(div().text_xl().font_bold().child(self.page.heading()))
                                     .child(
                                         div()
                                             .text_sm()
@@ -493,12 +559,12 @@ impl Render for Hub {
                             .id("my-tools-main-scroll")
                             .flex_1()
                             .overflow_y_scroll()
-                            .p_8()
+                            .p_4()
                             .child(content),
                     )
                     .child(
                         div()
-                            .px_8()
+                            .px_4()
                             .py_3()
                             .border_t_1()
                             .border_color(theme.border)

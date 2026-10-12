@@ -2,7 +2,6 @@
 
 use gpui_kit::*;
 use std::net::{SocketAddr, TcpStream};
-use std::process::Command;
 use std::time::Duration;
 
 // One executable and one process. The Win32 tray runs on a background thread;
@@ -41,10 +40,6 @@ fn receiver_online() -> bool {
     .is_ok()
 }
 
-fn pairing_url() -> String {
-    format!("http://127.0.0.1:{RECEIVER_PORT}/pair")
-}
-
 #[cfg(windows)]
 fn open_notes(quick: bool) -> Result<&'static str, String> {
     use windows_sys::Win32::UI::WindowsAndMessaging::{FindWindowW, PostMessageW, WM_APP};
@@ -75,22 +70,11 @@ fn open_notes(_quick: bool) -> Result<&'static str, String> {
     Err("Prompt Notes currently requires Windows.".into())
 }
 
-#[cfg(windows)]
-fn open_browser(url: &str) -> Result<(), String> {
-    // Explorer uses the user's registered default browser and is not kept running by this app.
-    Command::new("explorer.exe")
-        .arg(url)
-        .spawn()
-        .map_err(|error| error.to_string())?;
-    Ok(())
-}
-
-#[cfg(not(windows))]
-fn open_browser(_url: &str) -> Result<(), String> {
-    Err("Desktop launcher currently targets Windows".into())
-}
-
 mod hub;
+#[cfg(windows)]
+mod note_window;
+#[cfg(windows)]
+mod ui_bridge;
 use hub::Hub;
 
 fn main() {
@@ -116,6 +100,8 @@ fn main() {
             win::show_hub();
             return;
         }
+        notes::register_gpui_open(ui_bridge::request_note);
+        win::register_gpui_pairing(ui_bridge::request_pairing);
         std::thread::Builder::new()
             .name("my-tools-tray".into())
             .spawn(|| {
@@ -128,15 +114,18 @@ fn main() {
     let initially_hidden = std::env::args().any(|arg| arg == "--minimized");
     application().with_assets(assets::Assets).run(move |cx| {
         init(cx);
+        #[cfg(windows)]
+        note_window::init(cx);
         let options = WindowOptions {
             titlebar: Some(TitlebarOptions {
                 title: Some(win::hub_title().into()),
                 ..Default::default()
             }),
             show: !initially_hidden,
+            window_bounds: Some(WindowBounds::centered(size(px(860.), px(590.)), cx)),
             ..WindowOptions::default()
         };
-        open_window(options, cx, |window, cx| {
+        let handle = open_window(options, cx, |window, cx| {
             #[cfg(windows)]
             window.on_window_should_close(cx, |_, cx| {
                 if win::exiting() {
@@ -150,5 +139,10 @@ fn main() {
             cx.new(|_| Hub::new())
         })
         .expect("Unable to open My Tools");
+        #[cfg(windows)]
+        {
+            ui_bridge::set_hub(handle);
+            ui_bridge::start(cx);
+        }
     });
 }

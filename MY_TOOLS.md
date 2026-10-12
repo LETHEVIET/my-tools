@@ -5,8 +5,10 @@
 The dashboard now uses GPUI Kit's default-theme **Sidebar** shell, with pages for
 Overview, each tool, **Saved Notes** and Settings. Saved Notes displays your
 recent Quick Notes on the left and a read-only full note preview on the right.
-Use **Refresh** after saving another note, or **Open folder** for the original
+The list refreshes after saving a note; you can also use **Refresh** or **Open folder** for the original
 UTF-8 files. The hub never needs to send stored note contents over HTTP.
+The main window defaults to a compact 860 × 590 size, while Prompt Notes and
+Quick Note each use a 560 × 405 GPUI Kit-themed editor window.
 The SVG logo source is `desktop/assets/my-tools.svg`; generated
 `desktop/assets/my-tools.ico` is included as an EXE resource and in the tray.
 The same artwork supplies the iPhone home-screen icons.
@@ -31,24 +33,24 @@ To avoid losing paired iPhones, the agent copies the existing pairing secret fro
 
 ## Prompt Notes — shortcut scratchpad
 
-**Ctrl+Alt+P** opens a small native Windows text window from anywhere, even when the GPUI hub is closed. Keep the tiny Rust receiver running in the system tray. The text window and its hotkey are part of the same receiver process, so no extra resident app or runtime is needed.
+**Ctrl+Alt+P** opens a GPUI Kit-themed text editor from anywhere, even when the main window is hidden. The shortcut runs in the same My Tools process, with no additional app required.
 
 1. On Windows, focus the ChatGPT, Claude, or other AI **prompt input**.
 2. Press **Ctrl+Alt+P**. Type or edit your longer prompt in **Prompt Notes**.
 3. Press **Ctrl+Enter** or click **Paste to AI**. The note is copied to the Windows clipboard, the previous application is reactivated, and Ctrl+V is sent. Your prompt is **not submitted automatically**.
-4. **Ctrl+S** saves without leaving, and **Esc** hides the scratchpad. **Copy only** copies the note without attempting to paste. The **Prompt Notes** tray-menu item and **Open Prompt Notes** button in the GPUI hub can open it, too; use **Copy only** if it was opened from the hub or tray instead of from your intended AI app.
+4. **Ctrl+S** saves the text to **Saved Notes** and **closes the note window**, while retaining the reusable Prompt Notes draft; **Esc** closes it without deleting the automatically saved draft. **Copy only** copies the note without pasting. The tray-menu item and desktop hub can open the editor too; use **Copy only** when no target AI prompt was focused first.
 
 Drafts auto-save while typing and are restored after restarting Windows. They live in `%LOCALAPPDATA%\MyTools\prompt-notes.txt` **as local, unencrypted plain text**. Avoid storing passwords or sensitive information. The last draft remains available after pasting so you can reuse and improve it.
 
 If Ctrl+Alt+P conflicts with another app, the receiver displays a warning and the **Prompt Notes** tray menu still works. Windows may prevent simulated Ctrl+V in elevated apps or if the previous window disappeared; in that case, the text remains on the clipboard for manual pasting. If you close the note without pasting, your draft remains saved.
 
-The hub uses GPUI Kit's built-in default theme. Prompt Notes uses Windows' native dialog controls. With one EXE and one process, GPUI remains loaded when the hub is hidden; that costs more idle memory than the old agent-only process, but simplifies installation and operation.
+The hub and both note editors use GPUI Kit's built-in default theme, Textarea and Button components. There is still one executable and one process. GPUI stays loaded when the dashboard is hidden, so the shortcuts can open these themed windows instantly.
 
 ## Quick Note — save without pasting
 
-Press **Ctrl+Alt+N** anywhere on Windows, type your note, then press **Ctrl+S** (or click **Save Note**) to save and hide the popup. Unlike Prompt Notes, **Quick Note never writes to your clipboard or sends Ctrl+V**. Each saved note becomes its own UTF-8 `.txt` file in `%LOCALAPPDATA%\MyTools\quick-notes\`, and the popup shows your most recent notes; double-click one to load it back for editing or saving as a new note. **Notes Folder** opens the local collection in File Explorer.
+Press **Ctrl+Alt+N** anywhere on Windows, type your note, then press **Ctrl+S** (or click **Save Note**) to save and **close** the popup. Unlike Prompt Notes, **Quick Note never writes to your clipboard or sends Ctrl+V**. Each saved note becomes its own UTF-8 `.txt` file in `%LOCALAPPDATA%\MyTools\quick-notes\`. Use **Saved Notes** in the main window to select and preview previous notes; **Notes folder** opens the local collection in File Explorer.
 
-Close the window with **Esc** to keep an unsaved Quick Note as a separate, auto-saved draft. You can return later without losing it. Saved Quick Notes and the Prompt Notes draft remain separate. Everything is stored locally, unencrypted, so don't put passwords or secrets in them. The native popup works even when the GPUI hub is hidden in the system tray.
+Close the note window with **Esc** to keep an unsaved Quick Note as a separate, auto-saved draft. You can return later without losing it. Saved Quick Notes and the Prompt Notes draft remain separate. Everything is stored locally, unencrypted, so don't put passwords or secrets in them. The themed editor works even when the main window is hidden in the system tray.
 
 ## App layout
 
@@ -56,7 +58,8 @@ Close the window with **Esc** to keep an unsaved Quick Note as a separate, auto-
 | --- | --- | --- |
 | My Tools desktop hub | `desktop/` | GPUI Kit native desktop window; default built-in theme and components; start receiver and open pairing QR |
 | Background services (linked into `my-tools.exe`) | `rust/` | Win32 tray, global hotkey, and HTTP receiver on background threads in the same process |
-| Prompt Notes | `rust/src/notes.rs` | Global hotkey, small native scratchpad, autosave, text clipboard and paste-back |
+| Prompt Notes | `desktop/src/note_window.rs`, `rust/src/notes.rs` | GPUI Kit editor, global hotkey, autosave, text clipboard and paste-back |
+| Tray-to-GPUI events | `desktop/src/ui_bridge.rs` | Routes pairing and global note shortcuts onto the GPUI foreground thread |
 | iPhone tools index | `web/index.html` | Launch available mobile tools |
 | Snap to Paste Image | `web/tools/snap-to-paste-image/` | Camera and library picker, image upload |
 | Backend tool catalog | `rust/src/tools.rs` | Stable tool names and API routes |
@@ -66,7 +69,7 @@ Close the window with **Esc** to keep an unsaved Quick Note as a separate, auto-
 1. Build the single app with `build_hub_windows.bat` (or `build_windows.bat`). Exit any old version from the tray before replacing its running executable.
 2. Run `start_hub_windows.bat` to open **My Tools**, or `start_windows.bat` to start hidden in the tray. The **Prompt Notes** shortcut works even when the dashboard is hidden.
 3. GPUI Kit requires Rust MSVC, Windows SDK, Visual Studio C++ Build Tools, and CMake. Install CMake with `winget install Kitware.CMake`. If working inside this repo's `.venv`, `python -m pip install cmake` is also an option; the build script detects `.venv\Scripts\cmake.exe`.
-4. In **My Tools**, choose **Pair iPhone** to open the QR code. On your phone, the `My Tools` page lists **Snap to Paste Image** as its first tool.
+4. In **My Tools**, choose **Pair iPhone** to display the QR directly inside the desktop Photo tool page—no Windows browser tab is opened. Scan with your iPhone and open the iPhone web app as normal.
 5. Leave the small receiver running in the system tray even after closing the hub window. The GPUI hub does not need to remain open for photo uploads.
 
 GPUI Kit controls use its built-in default theme, including system light/dark preferences. This project deliberately does not ship a custom theme or include GPUI Shell's optional JavaScript plugin runtime.
@@ -90,4 +93,4 @@ cargo check --locked --manifest-path desktop\Cargo.toml
 python -m unittest discover -s tests -v
 ```
 
-The desktop UI requires testing visually on Windows and the actual Ctrl+V flow still needs an interactive focused-app test after changes. The GPUI executable is optional; only the small tray receiver stays running for background work.
+The desktop UI and the actual Ctrl+V flow still benefit from an interactive focused-app test after changes. My Tools always uses one process: the GPUI window can hide to the tray, where the image receiver and note shortcuts continue to run.
