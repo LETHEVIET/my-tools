@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+build/
+dist/
+*.spec
+rust/target*/
+# Runtime secrets and machine-specific configuration
+.env
+.env.*
+!.env.example
+pairing-token.txt
+*.log
+*.tmp
