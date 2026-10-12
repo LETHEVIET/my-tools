@@ -110,13 +110,13 @@ impl NoteWindow {
         let content = self.content(cx);
         // Ctrl+S always creates a new entry on the Saved Notes page.
         // Prompt Notes additionally retains its reusable working draft.
-        let result = quick_notes_store::save(&content).and_then(|_| {
-            if self.quick {
-                Ok(())
-            } else {
-                notes::save_gpui_draft(false, &content)
+        let result = (|| {
+            if !self.quick {
+                notes::save_gpui_draft(false, &content)?;
             }
-        });
+            quick_notes_store::save_kind(&content, if self.quick { "quick" } else { "prompt" })?;
+            Ok(())
+        })();
         match result {
             Ok(()) => {
                 if self.quick {
@@ -155,7 +155,7 @@ impl NoteWindow {
     }
 
     fn open_folder(&mut self, cx: &mut Context<Self>) {
-        match quick_notes_store::folder().and_then(|folder| {
+        match quick_notes_store::data_folder().and_then(|folder| {
             std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
             Command::new("explorer.exe")
                 .arg(folder)
@@ -285,7 +285,7 @@ impl Render for NoteWindow {
                             .child(
                                 Button::new("note-secondary")
                                     .label(if self.quick {
-                                        "Notes folder"
+                                        "Data folder"
                                     } else {
                                         "Copy only"
                                     })

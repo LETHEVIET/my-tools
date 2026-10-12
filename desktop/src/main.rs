@@ -136,7 +136,7 @@ fn main() {
                     false
                 }
             });
-            cx.new(|_| Hub::new())
+            cx.new(|cx| Hub::new(window, cx))
         })
         .expect("Unable to open My Tools");
         #[cfg(windows)]

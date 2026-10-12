@@ -25,8 +25,10 @@ Windows doesn't open a browser to display it.
 - **Quick Note:** press **Ctrl+Alt+N** to capture an idea. Use **Save Note** or **Ctrl+S** to save a separate local note and close the popup, without copying or pasting anything. Find saved notes in the **Saved Notes** sidebar page.
 
 You can also open **Saved Notes** from the left sidebar and select any note to
-read it in full, or choose **Open folder** to work with the underlying plain
-text files in File Explorer.
+edit its title, text and tags. Saved Notes has **SQLite FTS5 keyword search**
+and a pin-to-top action. Existing Quick Note `.txt` files are imported once
+into `%LOCALAPPDATA%\MyTools\my-tools.db` without deleting the originals.
+See [NOTES_DATABASE.md](NOTES_DATABASE.md) for backup and migration details.
 
 ## Install
 

@@ -3,10 +3,11 @@
 **Since v0.4.0 My Tools distributes exactly one executable:** `my-tools.exe`. It opens the GPUI Kit dashboard when double-clicked. Closing the window hides to the system tray; double-click the tray icon to reopen. The HTTP image receiver and global Prompt Notes hotkey operate on background threads in the same process. Choose **Exit My Tools** in the tray menu to stop it. `my-tools.exe --minimized` launches directly into the tray. The native Rust modules remain separate in source for maintainability, but are linked into the **same executable**.
 
 The dashboard now uses GPUI Kit's default-theme **Sidebar** shell, with pages for
-Overview, each tool, **Saved Notes** and Settings. Saved Notes displays your
-recent Quick Notes on the left and a read-only full note preview on the right.
-The list refreshes after saving a note; you can also use **Refresh** or **Open folder** for the original
-UTF-8 files. The hub never needs to send stored note contents over HTTP.
+Overview, each tool, **Saved Notes** and Settings. Saved Notes now uses
+**SQLite with FTS5 keyword search**, editable titles/bodies/tags, and pin-to-top
+controls. Saved notes live in `%LOCALAPPDATA%\MyTools\my-tools.db`; existing
+legacy `.txt` notes are imported once and never deleted. Use **Data folder**
+to open local storage. See [NOTES_DATABASE.md](NOTES_DATABASE.md).
 The main window defaults to a compact 860 × 590 size, while Prompt Notes and
 Quick Note each use a 560 × 405 GPUI Kit-themed editor window.
 The SVG logo source is `desktop/assets/my-tools.svg`; generated
@@ -48,7 +49,7 @@ The hub and both note editors use GPUI Kit's built-in default theme, Textarea an
 
 ## Quick Note — save without pasting
 
-Press **Ctrl+Alt+N** anywhere on Windows, type your note, then press **Ctrl+S** (or click **Save Note**) to save and **close** the popup. Unlike Prompt Notes, **Quick Note never writes to your clipboard or sends Ctrl+V**. Each saved note becomes its own UTF-8 `.txt` file in `%LOCALAPPDATA%\MyTools\quick-notes\`. Use **Saved Notes** in the main window to select and preview previous notes; **Notes folder** opens the local collection in File Explorer.
+Press **Ctrl+Alt+N** anywhere on Windows, type your note, then press **Ctrl+S** (or click **Save Note**) to save and **close** the popup. Unlike Prompt Notes, **Quick Note never writes to your clipboard or sends Ctrl+V**. Each saved note becomes a record in local SQLite. Use **Saved Notes** in the main window to search, edit, tag or pin notes; **Data folder** opens the local database directory.
 
 Close the note window with **Esc** to keep an unsaved Quick Note as a separate, auto-saved draft. You can return later without losing it. Saved Quick Notes and the Prompt Notes draft remain separate. Everything is stored locally, unencrypted, so don't put passwords or secrets in them. The themed editor works even when the main window is hidden in the system tray.
 

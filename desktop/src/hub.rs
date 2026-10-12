@@ -5,13 +5,13 @@ use gpui_kit::base::StyledExt as _;
 use gpui_kit::component::{
     badge::Badge,
     button::{Button, ButtonVariants},
+    input::{Input, InputEvent, InputState, Textarea, TextareaState},
     sidebar::{Sidebar, SidebarFooter, SidebarGroup, SidebarHeader, SidebarMenu, SidebarMenuItem},
     ActiveTheme as _, Icon, IconName,
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use qrcode::{Color, QrCode};
-use std::path::PathBuf;
 use std::process::Command;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -51,20 +51,45 @@ impl Page {
 pub(super) struct Hub {
     page: Page,
     status: String,
-    notes: Vec<(PathBuf, String)>,
-    selected: Option<PathBuf>,
-    selected_content: String,
+    notes: Vec<quick_notes_store::Note>,
+    selected: Option<i64>,
+    search: Entity<InputState>,
+    title: Entity<InputState>,
+    tags: Entity<InputState>,
+    body: Entity<TextareaState>,
+    _search_subscription: Subscription,
     collapsed: bool,
 }
 
 impl Hub {
-    pub(super) fn new() -> Self {
+    pub(super) fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let search = cx.new(|cx| InputState::new(window, cx));
+        let title = cx.new(|cx| InputState::new(window, cx));
+        let tags = cx.new(|cx| InputState::new(window, cx));
+        let body = cx.new(|cx| TextareaState::new(window, cx));
+        let _search_subscription = cx.subscribe(&search, |this, _, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::Change) {
+                this.refresh_saved(cx);
+                cx.notify();
+            }
+        });
+        let (notes, status) = match quick_notes_store::list("", 200) {
+            Ok(notes) => (
+                notes,
+                "Ready. Closing the window keeps your tools running in the tray.".into(),
+            ),
+            Err(err) => (vec![], format!("Cannot open saved notes: {err}")),
+        };
         Self {
             page: Page::Home,
-            status: "Ready. Closing the window keeps your tools running in the tray.".into(),
-            notes: quick_notes_store::recent(200),
+            status,
+            notes,
             selected: None,
-            selected_content: String::new(),
+            search,
+            title,
+            tags,
+            body,
+            _search_subscription,
             collapsed: false,
         }
     }
@@ -72,40 +97,84 @@ impl Hub {
     fn navigate(&mut self, page: Page, cx: &mut Context<Self>) {
         self.page = page;
         if page == Page::Saved {
-            self.refresh_saved();
+            self.refresh_saved(cx);
         }
         cx.notify();
     }
 
-    fn refresh_saved(&mut self) {
-        self.notes = quick_notes_store::recent(200);
-        if let Some(path) = &self.selected {
-            if !self.notes.iter().any(|(item, _)| item == path) {
+    fn refresh_saved(&mut self, cx: &mut Context<Self>) {
+        let query = self.search.read(cx).value().to_string();
+        match quick_notes_store::list(&query, 200) {
+            Ok(notes) => self.notes = notes,
+            Err(err) => {
+                self.status = format!("Search failed: {err}");
+                self.notes.clear();
+            }
+        }
+        if let Some(id) = self.selected {
+            if !self.notes.iter().any(|item| item.id == id) {
                 self.selected = None;
-                self.selected_content.clear();
             }
         }
     }
 
     pub(super) fn refresh_after_note_save(&mut self, cx: &mut Context<Self>) {
-        self.refresh_saved();
+        self.refresh_saved(cx);
         cx.notify();
     }
 
-    fn pick_note(&mut self, path: PathBuf, cx: &mut Context<Self>) {
-        match std::fs::read_to_string(&path) {
-            Ok(contents) => {
-                self.selected_content = contents;
-                self.selected = Some(path);
-                self.status = "Note loaded from your PC. No clipboard changes.".into();
+    fn pick_note(&mut self, id: i64, window: &mut Window, cx: &mut Context<Self>) {
+        match quick_notes_store::get(id) {
+            Ok(Some(note)) => {
+                self.title
+                    .update(cx, |state, cx| state.set_value(note.title, window, cx));
+                self.tags
+                    .update(cx, |state, cx| state.set_value(note.tags, window, cx));
+                self.body
+                    .update(cx, |state, cx| state.set_value(note.body, window, cx));
+                self.selected = Some(id);
+                self.status = "Note loaded from SQLite. Edit and choose Save changes.".into();
             }
+            Ok(None) => self.status = "That note no longer exists.".into(),
             Err(error) => self.status = format!("Cannot open saved note: {error}"),
         }
         cx.notify();
     }
 
+    fn save_selected(&mut self, cx: &mut Context<Self>) {
+        if let Some(id) = self.selected {
+            let title = self.title.read(cx).value().to_string();
+            let tags = self.tags.read(cx).value().to_string();
+            let body = self.body.read(cx).value().to_string();
+            self.status = match quick_notes_store::update(id, &title, &body, &tags) {
+                Ok(()) => "Changes saved to your local SQLite database.".into(),
+                Err(error) => error,
+            };
+            self.refresh_saved(cx);
+            cx.notify();
+        }
+    }
+
+    fn toggle_pin(&mut self, cx: &mut Context<Self>) {
+        if let Some(id) = self.selected {
+            if let Ok(Some(note)) = quick_notes_store::get(id) {
+                self.status = match quick_notes_store::set_pinned(id, !note.pinned) {
+                    Ok(()) => if note.pinned {
+                        "Note unpinned."
+                    } else {
+                        "Note pinned to the top."
+                    }
+                    .into(),
+                    Err(error) => error,
+                };
+                self.refresh_saved(cx);
+                cx.notify();
+            }
+        }
+    }
+
     fn open_notes_folder(&mut self, cx: &mut Context<Self>) {
-        self.status = match quick_notes_store::folder() {
+        self.status = match quick_notes_store::data_folder() {
             Ok(folder) => match std::fs::create_dir_all(&folder) {
                 Err(error) => format!("Could not create notes directory: {error}"),
                 Ok(()) => match Command::new("explorer.exe").arg(folder).spawn() {
@@ -260,7 +329,7 @@ impl Hub {
                                 div()
                                     .text_xs()
                                     .text_color(cx.theme().muted_foreground)
-                                    .child("v0.5 · Runs in system tray"),
+                                    .child("v0.7 · SQLite · System tray"),
                             )
                         })
                         .child(
@@ -444,47 +513,69 @@ impl Hub {
                 .into_any_element(),
             Page::Saved => {
                 let note_items = self.notes.clone();
-                let selected = self.selected.clone();
-                let preview = self.selected_content.clone();
+                let selected = self.selected;
+                let pinned = selected.and_then(|id| self.notes.iter().find(|note| note.id == id))
+                    .is_some_and(|note| note.pinned);
                 div().flex().flex_col().gap_4()
                     .child(div().flex().items_center().justify_between()
                         .child(div().flex().items_center().gap_2()
                             .child(Icon::new(IconName::FolderOpen))
                             .child(div().text_sm().text_color(theme.muted_foreground)
-                                .child(format!("{} notes stored on this computer", self.notes.len()))))
+                                .child(format!("{} matching notes · SQLite + FTS5", self.notes.len()))))
                         .child(div().flex().gap_2()
+                            .child(Button::new("saved-new").primary().label("New note")
+                                .on_click(cx.listener(|this, _, _, cx| this.open_quick(cx))))
                             .child(Button::new("saved-refresh").label("Refresh")
                                 .on_click(cx.listener(|this, _, _, cx| {
-                                    this.refresh_saved(); cx.notify();
+                                    this.refresh_saved(cx); cx.notify();
                                 })))
-                            .child(Button::new("saved-folder").label("Open folder")
+                            .child(Button::new("saved-folder").label("Data folder")
                                 .on_click(cx.listener(|this, _, _, cx| this.open_notes_folder(cx))))))
+                    .child(div().flex().flex_col().gap_1()
+                        .child(div().text_xs().text_color(theme.muted_foreground)
+                            .child("Search note titles, text, or tags"))
+                        .child(Input::new(&self.search).aria_label("Search saved notes by keywords, body, or tags")))
                     .child(div().flex().gap_3().min_h(px(300.))
                         .child(div().w(px(208.)).flex_shrink_0().rounded_lg().border_1()
                             .border_color(theme.border).p_3().gap_2().flex().flex_col()
-                            .child(div().text_sm().font_bold().child("Recent notes"))
+                            .child(div().text_sm().font_bold().child("Saved notes"))
                             .child(div().id("saved-notes-scroll").flex_1().overflow_y_scroll()
                                 .gap_2().flex().flex_col()
                                 .when(note_items.is_empty(), |this| this.child(
                                     div().text_sm().text_color(theme.muted_foreground)
-                                        .child("Nothing saved yet. Use Ctrl+Alt+N to add your first note.")))
-                                .children(note_items.into_iter().enumerate().map(|(ix, (path, title))| {
-                                    let chosen = selected.as_ref() == Some(&path);
+                                        .child("No matching notes. Try another search or press Ctrl+Alt+N.")))
+                                .children(note_items.into_iter().enumerate().map(|(ix, note)| {
+                                    let chosen = selected == Some(note.id);
+                                    let id = note.id;
                                     Button::new(format!("saved-entry-{ix}"))
-                                        .label(title)
+                                        .label(format!("{}{}{}", if note.pinned { "★ " } else { "" },
+                                            if note.kind == "prompt" { "Prompt · " } else { "" }, note.title))
                                         .when(chosen, |this| this.primary())
-                                        .on_click(cx.listener(move |this, _, _, cx| this.pick_note(path.clone(), cx)))
+                                        .on_click(cx.listener(move |this, _, window, cx| this.pick_note(id, window, cx)))
                                         .into_any_element()
                                 }))))
                         .child(div().flex_1().min_w_0().rounded_lg().border_1()
                             .border_color(theme.border).p_3().flex().flex_col().gap_3()
-                            .child(div().font_bold().child("Note preview"))
-                            .child(div().text_sm().text_color(theme.muted_foreground)
-                                .child("Select a note on the left to read it. Notes remain on your PC."))
-                            .child(div().id("saved-note-preview").flex_1().overflow_y_scroll()
-                                .child(if selected.is_some() { preview } else {
-                                    "Choose a saved note to see its contents here.".into()
-                                }))))
+                            .child(div().font_bold().child("Edit note"))
+                            .when(selected.is_none(), |this| this.child(
+                                div().text_sm().text_color(theme.muted_foreground)
+                                    .child("Select a note on the left. Old text files have been imported without deletion.")
+                            ))
+                            .when(selected.is_some(), |this| this
+                                .child(div().text_xs().text_color(theme.muted_foreground).child("Title"))
+                                .child(Input::new(&self.title).aria_label("Note title"))
+                                .child(div().flex_1().min_h(px(155.)).child(
+                                    Textarea::new(&self.body).h(relative(1.)).aria_label("Note body")))
+                                .child(div().text_xs().text_color(theme.muted_foreground)
+                                    .child("Tags (comma-separated)"))
+                                .child(Input::new(&self.tags).aria_label("Tags, separated by commas"))
+                                .child(div().flex().gap_2()
+                                    .child(Button::new("saved-save").primary().label("Save changes")
+                                        .on_click(cx.listener(|this, _, _, cx| this.save_selected(cx))))
+                                    .child(Button::new("saved-pin")
+                                        .label(if pinned { "Unpin" } else { "Pin to top" })
+                                        .on_click(cx.listener(|this, _, _, cx| this.toggle_pin(cx))))))
+                        ))
                     .into_any_element()
             }
             Page::Settings => div().flex().flex_col().gap_4()

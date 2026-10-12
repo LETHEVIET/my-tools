@@ -1,6 +1,6 @@
 [package]
 name = "my-tools-agent"
-version = "0.6.0"
+version = "0.7.0"
 edition = "2021"
 description = "My Tools lightweight Windows background agent"
 
@@ -11,6 +11,7 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png"]
 kamadak-exif = "0.6"
 qrcode = { version = "0.14", default-features = false }
 tiny_http = "0.12"
+rusqlite = { version = "0.37", features = ["bundled"] }
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Graphics_Gdi",

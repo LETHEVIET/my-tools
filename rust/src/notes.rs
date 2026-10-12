@@ -47,7 +47,7 @@ static EDIT: AtomicIsize = AtomicIsize::new(0);
 static TARGET: AtomicIsize = AtomicIsize::new(0);
 static QUICK_MODE: AtomicBool = AtomicBool::new(false);
 static SAVED_LIST: AtomicIsize = AtomicIsize::new(0);
-static SAVED_PATHS: OnceLock<Mutex<Vec<PathBuf>>> = OnceLock::new();
+static SAVED_PATHS: OnceLock<Mutex<Vec<i64>>> = OnceLock::new();
 // The GPUI desktop app registers this handler. The standalone Rust test
 // receiver can still use the legacy Win32 notes popup.
 static GPUI_OPEN: OnceLock<fn(bool)> = OnceLock::new();
@@ -59,7 +59,7 @@ pub fn register_gpui_open(handler: fn(bool)) {
 fn is_quick() -> bool {
     QUICK_MODE.load(Ordering::Relaxed)
 }
-fn saved_paths() -> &'static Mutex<Vec<PathBuf>> {
+fn saved_paths() -> &'static Mutex<Vec<i64>> {
     SAVED_PATHS.get_or_init(|| Mutex::new(Vec::new()))
 }
 
@@ -305,14 +305,14 @@ fn refresh_saved_notes() {
     if list.is_null() {
         return;
     }
-    let notes = quick_notes_store::recent(15);
+    let notes = quick_notes_store::list("", 15).unwrap_or_default();
     let mut paths = saved_paths().lock().unwrap();
     paths.clear();
     unsafe {
         SendMessageW(list, LB_RESETCONTENT, 0, 0);
-        for (path, title) in notes {
-            SendMessageW(list, LB_ADDSTRING, 0, wide(&title).as_ptr() as isize);
-            paths.push(path);
+        for note in notes {
+            SendMessageW(list, LB_ADDSTRING, 0, wide(&note.title).as_ptr() as isize);
+            paths.push(note.id);
         }
     }
 }
@@ -323,14 +323,13 @@ fn open_saved_note() {
     if index < 0 {
         return;
     }
-    let path = saved_paths().lock().unwrap().get(index as usize).cloned();
-    if let Some(path) = path {
-        if let Ok(content) = fs::read_to_string(&path) {
-            // The saved file is kept intact; saving again creates another note.
+    let id = saved_paths().lock().unwrap().get(index as usize).copied();
+    if let Some(id) = id {
+        if let Ok(Some(note)) = quick_notes_store::get(id) {
             unsafe {
                 SetWindowTextW(
                     EDIT.load(Ordering::Relaxed) as HWND,
-                    wide(&content).as_ptr(),
+                    wide(&note.body).as_ptr(),
                 );
             }
         }

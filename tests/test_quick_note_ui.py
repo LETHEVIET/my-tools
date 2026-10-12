@@ -6,6 +6,7 @@ installed copy. Keyboard injection is guarded by a foreground-window check.
 """
 import ctypes
 import os
+import sqlite3
 from pathlib import Path
 import socket
 import subprocess
@@ -106,12 +107,16 @@ class QuickNoteUiTest(unittest.TestCase):
                 user32.keybd_event(0x53, 0, 0, 0)  # S down
                 user32.keybd_event(0x53, 0, 2, 0)  # S up
                 user32.keybd_event(0x11, 0, 2, 0) # Ctrl up
-                notes = Path(data) / "MyTools" / "quick-notes"
-                wait_for(lambda: bool(list(notes.glob("note-*.txt"))), seconds=6)
+                database = Path(data) / "MyTools" / "my-tools.db"
+                def saved_bodies():
+                    if not database.exists():
+                        return []
+                    with sqlite3.connect(database, timeout=3) as conn:
+                        return conn.execute("SELECT body FROM notes WHERE kind='quick'").fetchall()
+                wait_for(lambda: bool(saved_bodies()), seconds=6)
                 self.assertIsNone(own_window(title="Quick Note - My Tools"),
                                   "Ctrl+S must close the note popup after saving")
-                self.assertEqual(len(list(notes.glob("note-*.txt"))), 1)
-                self.assertEqual(next(notes.glob("note-*.txt")).read_text(encoding="utf-8"), content)
+                self.assertEqual(saved_bodies(), [(content,)])
                 self.assertEqual(draft.read_text(encoding="utf-8"), "")
                 self.assertFalse((Path(data) / "MyTools" / "prompt-notes.txt").exists())
                 self.assertIsNone(proc.poll())
