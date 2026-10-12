@@ -13,6 +13,7 @@ use image::{DynamicImage, GenericImageView, ImageReader};
 use qrcode::{Color, QrCode};
 use tiny_http::{Header, Method, Request, Response, Server, StatusCode};
 
+use crate::tools;
 use crate::win;
 
 const MAX_UPLOAD: usize = 16 * 1024 * 1024;
@@ -38,25 +39,43 @@ fn random_token() -> Result<String, String> {
 
 impl State {
     pub fn load(base_url: String) -> Result<Arc<Self>, String> {
-        let app_dir = std::env::var_os("LOCALAPPDATA")
+        let profile = std::env::var_os("LOCALAPPDATA")
             .map(PathBuf::from)
             .or_else(|| std::env::var_os("USERPROFILE").map(PathBuf::from))
-            .ok_or("Cannot find user profile directory")?
-            .join("SnapToPrompt");
+            .ok_or("Cannot find user profile directory")?;
+        let app_dir = profile.join("MyTools");
         fs::create_dir_all(&app_dir)
             .map_err(|e| format!("Cannot create settings directory: {e}"))?;
         let token_file = app_dir.join("pairing-token.txt");
-        let token = fs::read_to_string(&token_file)
-            .ok()
-            .map(|s| s.trim().to_string())
-            .filter(|s| {
-                s.len() >= 40
-                    && s.bytes()
-                        .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
-            });
+        // Preserve existing paired iPhones during the Snap to Prompt -> My Tools rename.
+        // The old file is deliberately left in place so legacy rollback remains possible.
+        let valid_token = |path: &PathBuf| {
+            fs::read_to_string(path)
+                .ok()
+                .map(|s| s.trim().to_string())
+                .filter(|s| {
+                    s.len() >= 40
+                        && s.bytes()
+                            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+                })
+        };
+        let current_token = valid_token(&token_file);
+        let legacy_token = if current_token.is_none() {
+            valid_token(&profile.join("SnapToPrompt").join("pairing-token.txt"))
+        } else {
+            None
+        };
+        let needs_current_token_file = current_token.is_none();
+        let token = current_token.or(legacy_token);
         let first_run = token.is_none();
         let token = match token {
-            Some(t) => t,
+            Some(t) => {
+                if needs_current_token_file {
+                    fs::write(&token_file, format!("{t}\n"))
+                        .map_err(|e| format!("Cannot migrate pairing secret: {e}"))?;
+                }
+                t
+            }
             None => {
                 let t = random_token()?;
                 fs::write(&token_file, format!("{t}\n"))
@@ -78,7 +97,12 @@ impl State {
     }
 
     pub fn pairing_url(&self) -> String {
-        format!("{}/#pair={}", self.base_url, self.token.lock().unwrap())
+        format!(
+            "{}{}#pair={}",
+            self.base_url,
+            tools::SNAP_TO_PASTE_IMAGE.mobile_path,
+            self.token.lock().unwrap()
+        )
     }
 
     pub fn rotate(&self) -> Result<(), String> {
@@ -167,12 +191,22 @@ fn asset(path: &str) -> Option<(&'static [u8], &'static str)> {
             include_bytes!("../../web/index.html").as_slice(),
             "text/html; charset=utf-8",
         ),
-        "/app.js" => (
-            include_bytes!("../../web/app.js").as_slice(),
+        "/hub.css" => (
+            include_bytes!("../../web/hub.css").as_slice(),
+            "text/css; charset=utf-8",
+        ),
+        "/tools/snap-to-paste-image"
+        | "/tools/snap-to-paste-image/"
+        | "/tools/snap-to-paste-image/index.html" => (
+            include_bytes!("../../web/tools/snap-to-paste-image/index.html").as_slice(),
+            "text/html; charset=utf-8",
+        ),
+        "/tools/snap-to-paste-image/app.js" | "/app.js" => (
+            include_bytes!("../../web/tools/snap-to-paste-image/app.js").as_slice(),
             "text/javascript; charset=utf-8",
         ),
-        "/app.css" => (
-            include_bytes!("../../web/app.css").as_slice(),
+        "/tools/snap-to-paste-image/app.css" | "/app.css" => (
+            include_bytes!("../../web/tools/snap-to-paste-image/app.css").as_slice(),
             "text/css; charset=utf-8",
         ),
         "/sw.js" => (
@@ -220,7 +254,8 @@ fn pairing_page(state: &State) -> String {
     }
     svg.push_str("</svg>");
     format!(
-        r#"<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>Snap to Prompt pairing</title><style>body{{font:16px system-ui;background:#101827;color:#eff8f9;margin:0;min-height:100vh;display:grid;place-items:center}}main{{text-align:center;max-width:440px;padding:25px}}svg{{background:white;padding:12px;border-radius:12px;max-width:90vw}}a{{color:#45dfb0;overflow-wrap:anywhere}}p{{color:#b5c4d5}}button{{background:#24384c;color:white;border:0;border-radius:8px;padding:12px 18px;cursor:pointer}}</style></head><body><main><h1>Snap to Prompt</h1><p>Scan this once with your iPhone camera. Leave this receiver running in the Windows tray.</p>{svg}<p><a href="{link}">Open pairing URL</a></p><p>After pairing, focus the AI prompt on Windows and take a photo on iPhone.</p></main></body></html>"#,
+        r#"<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>My Tools pairing</title><style>body{{font:16px system-ui;background:#101827;color:#eff8f9;margin:0;min-height:100vh;display:grid;place-items:center}}main{{text-align:center;max-width:440px;padding:25px}}svg{{background:white;padding:12px;border-radius:12px;max-width:90vw}}a{{color:#45dfb0;overflow-wrap:anywhere}}p{{color:#b5c4d5}}button{{background:#24384c;color:white;border:0;border-radius:8px;padding:12px 18px;cursor:pointer}}</style></head><body><main><h1>{tool_label}</h1><p>Scan this once with your iPhone camera. Leave the receiver running in the Windows tray.</p>{svg}<p><a href="{link}">Open pairing URL</a></p><p>After pairing, focus the AI prompt on Windows and take a photo on iPhone.</p></main></body></html>"#,
+        tool_label = tools::SNAP_TO_PASTE_IMAGE.label,
         link = escape_html(&url)
     )
 }
@@ -268,6 +303,14 @@ fn normalized_image(bytes: &[u8]) -> Result<DynamicImage, &'static str> {
 
 fn handle(mut req: Request, state: &Arc<State>) {
     let path = req.url().split('?').next().unwrap_or("");
+    if req.method() == &Method::Get && path == "/api/tools" {
+        return respond(
+            req,
+            200,
+            "application/json; charset=utf-8",
+            tools::catalog_json().into_bytes(),
+        );
+    }
     if req.method() == &Method::Get && path == "/pair" {
         let is_local = req
             .remote_addr()
@@ -282,7 +325,7 @@ fn handle(mut req: Request, state: &Arc<State>) {
             pairing_page(state).into_bytes(),
         );
     }
-    if req.method() == &Method::Get && path == "/api/status" {
+    if req.method() == &Method::Get && tools::is_image_status_route(path) {
         let auth = req
             .headers()
             .iter()
@@ -306,7 +349,7 @@ fn handle(mut req: Request, state: &Arc<State>) {
             body.into_bytes(),
         );
     }
-    if req.method() == &Method::Post && path == "/api/photo" {
+    if req.method() == &Method::Post && tools::is_image_upload_route(path) {
         let auth = req
             .headers()
             .iter()
@@ -388,13 +431,18 @@ mod tests {
     fn assets_match_iphone_protocol() {
         assert!(std::str::from_utf8(asset("/app.js").unwrap().0)
             .unwrap()
-            .contains("/api/photo"));
+            .contains(tools::SNAP_TO_PASTE_IMAGE.upload_path));
         assert!(std::str::from_utf8(asset("/app.js").unwrap().0)
             .unwrap()
             .contains("getUserMedia"));
-        assert!(std::str::from_utf8(asset("/index.html").unwrap().0)
+        assert!(
+            std::str::from_utf8(asset("/tools/snap-to-paste-image/").unwrap().0)
+                .unwrap()
+                .contains("libraryInput")
+        );
+        assert!(std::str::from_utf8(asset("/").unwrap().0)
             .unwrap()
-            .contains("libraryInput"));
+            .contains("My Tools"));
         assert!(asset("/icons/icon-192.png").unwrap().0.len() > 100);
     }
     #[test]

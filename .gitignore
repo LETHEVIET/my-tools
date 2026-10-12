@@ -6,6 +6,7 @@ build/
 dist/
 *.spec
 rust/target*/
+desktop/target/
 # Runtime secrets and machine-specific configuration
 .env
 .env.*
@@ -13,3 +14,5 @@ rust/target*/
 pairing-token.txt
 *.log
 *.tmp
+release-files/
+release-dist/

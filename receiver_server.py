@@ -16,8 +16,15 @@ from image_processing import MAX_UPLOAD_BYTES, InvalidImage, load_and_normalize
 
 WEB_ROOT = Path(__file__).resolve().parent / "web"
 ALLOWED_FILES = {
-    "/": "index.html", "/index.html": "index.html", "/app.css": "app.css",
-    "/app.js": "app.js", "/sw.js": "sw.js", "/manifest.webmanifest": "manifest.webmanifest",
+    "/": "index.html", "/index.html": "index.html", "/hub.css": "hub.css",
+    "/tools/snap-to-paste-image": "tools/snap-to-paste-image/index.html",
+    "/tools/snap-to-paste-image/": "tools/snap-to-paste-image/index.html",
+    "/tools/snap-to-paste-image/index.html": "tools/snap-to-paste-image/index.html",
+    "/tools/snap-to-paste-image/app.css": "tools/snap-to-paste-image/app.css",
+    "/tools/snap-to-paste-image/app.js": "tools/snap-to-paste-image/app.js",
+    "/app.css": "tools/snap-to-paste-image/app.css",
+    "/app.js": "tools/snap-to-paste-image/app.js",
+    "/sw.js": "sw.js", "/manifest.webmanifest": "manifest.webmanifest",
     "/icons/icon-192.png": "icons/icon-192.png",
     "/icons/icon-512.png": "icons/icon-512.png",
 }
@@ -104,7 +111,7 @@ class SnapHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = urlsplit(self.path).path
-        if path == "/api/status":
+        if path in ("/api/status", "/api/tools/snap-to-paste-image/status"):
             if not self._authorized():
                 self._json(HTTPStatus.UNAUTHORIZED, {"error": "Not paired. Scan the new QR code."})
                 return
@@ -121,7 +128,7 @@ class SnapHandler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def do_POST(self):
-        if urlsplit(self.path).path != "/api/photo":
+        if urlsplit(self.path).path not in ("/api/photo", "/api/tools/snap-to-paste-image/photo"):
             self._json(HTTPStatus.NOT_FOUND, {"error": "Not found"})
             return
         if not self._authorized():

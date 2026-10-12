@@ -2,18 +2,24 @@
 
 #[cfg(not(windows))]
 fn main() {
-    eprintln!("Snap to Prompt's tray helper runs on Windows only.");
+    eprintln!("My Tools background agent runs on Windows only.");
 }
 
 #[cfg(windows)]
+mod notes;
+#[cfg(windows)]
 mod receiver;
+#[cfg(windows)]
+mod tools;
+#[cfg(windows)]
+mod update;
 #[cfg(windows)]
 mod win;
 
 #[cfg(windows)]
 fn main() {
     if let Err(error) = run() {
-        win::error_dialog(&format!("Snap to Prompt could not start:\n{error}"));
+        win::error_dialog(&format!("My Tools could not start:\n{error}"));
     }
 }
 

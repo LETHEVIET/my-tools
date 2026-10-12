@@ -1,7 +1,7 @@
 {
-  "name": "Snap to Prompt",
-  "short_name": "Snap to Prompt",
-  "description": "Snap a photo on iPhone and paste it into an AI prompt on your Windows PC.",
+  "name": "My Tools",
+  "short_name": "My Tools",
+  "description": "A personal collection of iPhone and Windows tools, starting with Snap to Paste Image.",
   "id": "/",
   "start_url": "/",
   "scope": "/",

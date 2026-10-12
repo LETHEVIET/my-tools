@@ -54,7 +54,7 @@
       return;
     }
     try {
-      const response = await fetch('/api/status', {
+      const response = await fetch('/api/tools/snap-to-paste-image/status', {
         headers: {'Authorization': 'Bearer ' + token},
         cache: 'no-store'
       });
@@ -234,7 +234,7 @@
       const prepared = alreadyJpeg ? file : await imageToJpeg(file);
       lastFile = prepared;
       showPhoto(prepared);
-      const response = await fetch('/api/photo', {
+      const response = await fetch('/api/tools/snap-to-paste-image/photo', {
         method: 'POST',
         headers: {'Authorization': 'Bearer ' + token, 'Content-Type': prepared.type},
         body: prepared, cache: 'no-store'

@@ -16,7 +16,8 @@ use windows_sys::Win32::System::Registry::{
     RegDeleteKeyValueW, RegGetValueW, RegSetKeyValueW, HKEY_CURRENT_USER, REG_SZ, RRF_RT_REG_SZ,
 };
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-    SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, VK_CONTROL,
+    RegisterHotKey, SendInput, UnregisterHotKey, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT,
+    KEYEVENTF_KEYUP, MOD_ALT, MOD_CONTROL, MOD_NOREPEAT, VK_CONTROL,
 };
 use windows_sys::Win32::UI::Shell::{
     ShellExecuteW, Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE,
@@ -27,10 +28,13 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     DispatchMessageW, GetCursorPos, GetForegroundWindow, GetMessageW, LoadIconW, MessageBoxW,
     PostQuitMessage, RegisterClassW, SetForegroundWindow, TrackPopupMenu, TranslateMessage,
     IDI_APPLICATION, MB_ICONERROR, MB_OK, MF_CHECKED, MF_SEPARATOR, MF_STRING, MSG, SW_SHOWNORMAL,
-    TPM_RIGHTBUTTON, WM_COMMAND, WM_DESTROY, WM_LBUTTONDBLCLK, WM_RBUTTONUP, WM_USER, WNDCLASSW,
+    TPM_RIGHTBUTTON, WM_APP, WM_CLOSE, WM_COMMAND, WM_DESTROY, WM_HOTKEY, WM_LBUTTONDBLCLK,
+    WM_RBUTTONUP, WM_USER, WNDCLASSW,
 };
 
+use crate::notes;
 use crate::receiver::State;
+use crate::update;
 
 const TRAY_CALLBACK: u32 = WM_USER + 29;
 const SHOW: usize = 1001;
@@ -38,8 +42,14 @@ const TOGGLE: usize = 1002;
 const ROTATE: usize = 1003;
 const AUTOSTART: usize = 1004;
 const EXIT: usize = 1005;
+const OPEN_NOTES: usize = 1006;
+const CHECK_UPDATES: usize = 1007;
+const AUTO_UPDATES: usize = 1008;
+const NOTES_HOTKEY_ID: i32 = 771;
+pub const WM_OPEN_NOTES: u32 = WM_APP + 42;
 const RUN_PATH: &str = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
-const RUN_NAME: &str = "SnapToPrompt";
+const RUN_NAME: &str = "MyTools";
+const LEGACY_RUN_NAME: &str = "SnapToPrompt";
 
 static STATE: OnceLock<Arc<State>> = OnceLock::new();
 static PORT: OnceLock<u16> = OnceLock::new();
@@ -54,7 +64,7 @@ pub fn error_dialog(message: &str) {
         MessageBoxW(
             null_mut(),
             wide(message).as_ptr(),
-            wide("Snap to Prompt").as_ptr(),
+            wide("My Tools").as_ptr(),
             MB_ICONERROR | MB_OK,
         );
     }
@@ -67,24 +77,62 @@ fn startup_cmd() -> String {
     )
 }
 
-fn start_on_login() -> bool {
+fn registry_run_value(name: &str) -> Option<String> {
     let mut buffer = [0u16; 2048];
     let mut size = (buffer.len() * 2) as u32;
     let result = unsafe {
         RegGetValueW(
             HKEY_CURRENT_USER,
             wide(RUN_PATH).as_ptr(),
-            wide(RUN_NAME).as_ptr(),
+            wide(name).as_ptr(),
             RRF_RT_REG_SZ,
             null_mut(),
             buffer.as_mut_ptr().cast(),
             &mut size,
         )
     };
-    result == 0
-        && String::from_utf16_lossy(
+    if result == 0 {
+        Some(String::from_utf16_lossy(
             &buffer[..buffer.iter().position(|&c| c == 0).unwrap_or(buffer.len())],
-        ) == startup_cmd()
+        ))
+    } else {
+        None
+    }
+}
+
+fn start_on_login() -> bool {
+    registry_run_value(RUN_NAME).is_some_and(|command| command == startup_cmd())
+}
+
+fn migrate_legacy_startup() {
+    // A previously enabled Start with Windows should keep working after rename;
+    // don't leave the old and new receivers both launching at login.
+    if registry_run_value(LEGACY_RUN_NAME).is_none() {
+        return;
+    }
+    if registry_run_value(RUN_NAME).is_none() {
+        let command = wide(&startup_cmd());
+        let result = unsafe {
+            RegSetKeyValueW(
+                HKEY_CURRENT_USER,
+                wide(RUN_PATH).as_ptr(),
+                wide(RUN_NAME).as_ptr(),
+                REG_SZ,
+                command.as_ptr().cast(),
+                (command.len() * 2) as u32,
+            )
+        };
+        if result != 0 {
+            return;
+        }
+    }
+    unsafe {
+        RegDeleteKeyValueW(
+            HKEY_CURRENT_USER,
+            wide(RUN_PATH).as_ptr(),
+            wide(LEGACY_RUN_NAME).as_ptr(),
+        );
+    }
 }
 
 fn toggle_start_on_login() -> Result<(), String> {
@@ -139,7 +187,7 @@ fn notify_icon(hwnd: HWND, add: bool) -> bool {
     icon.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
     icon.uCallbackMessage = TRAY_CALLBACK;
     icon.hIcon = unsafe { LoadIconW(null_mut(), IDI_APPLICATION) };
-    let tip = wide("Snap to Prompt - iPhone photo receiver");
+    let tip = wide("My Tools - Background Agent");
     icon.szTip[..tip.len()].copy_from_slice(&tip);
     unsafe { Shell_NotifyIconW(if add { NIM_ADD } else { NIM_DELETE }, &icon) != 0 }
 }
@@ -167,12 +215,35 @@ fn menu(hwnd: HWND) {
         AppendMenuW(menu, MF_STRING, ROTATE, wide("New pairing code").as_ptr());
         AppendMenuW(
             menu,
+            MF_STRING,
+            OPEN_NOTES,
+            wide("Prompt Notes   Ctrl+Alt+P").as_ptr(),
+        );
+        AppendMenuW(
+            menu,
+            MF_STRING,
+            CHECK_UPDATES,
+            wide("Check for updates").as_ptr(),
+        );
+        AppendMenuW(
+            menu,
+            MF_STRING
+                | if update::auto_enabled() {
+                    MF_CHECKED
+                } else {
+                    0
+                },
+            AUTO_UPDATES,
+            wide("Automatic updates").as_ptr(),
+        );
+        AppendMenuW(
+            menu,
             MF_STRING | if start_on_login() { MF_CHECKED } else { 0 },
             AUTOSTART,
             wide("Start with Windows").as_ptr(),
         );
         AppendMenuW(menu, MF_SEPARATOR, 0, null());
-        AppendMenuW(menu, MF_STRING, EXIT, wide("Exit Snap to Prompt").as_ptr());
+        AppendMenuW(menu, MF_STRING, EXIT, wide("Exit My Tools").as_ptr());
         let mut point: POINT = zeroed();
         GetCursorPos(&mut point);
         SetForegroundWindow(hwnd);
@@ -191,9 +262,29 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             }
             0
         }
+        WM_HOTKEY if wparam == NOTES_HOTKEY_ID as usize => {
+            notes::show(hwnd, true);
+            0
+        }
+        WM_OPEN_NOTES => {
+            notes::show(hwnd, false);
+            0
+        }
         WM_COMMAND => {
             match wparam & 0xFFFF {
                 SHOW => show_pairing(),
+                OPEN_NOTES => notes::show(hwnd, false),
+                CHECK_UPDATES => {
+                    if let Err(message) = update::check_now(true) {
+                        error_dialog(&message);
+                    }
+                }
+                AUTO_UPDATES => {
+                    let enabled = !update::auto_enabled();
+                    if let Err(message) = update::set_auto_enabled(enabled) {
+                        error_dialog(&message);
+                    }
+                }
                 TOGGLE => {
                     if let Some(s) = STATE.get() {
                         s.auto_paste.fetch_xor(true, Ordering::Relaxed);
@@ -220,7 +311,13 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             }
             0
         }
+        WM_CLOSE => {
+            DestroyWindow(hwnd);
+            0
+        }
         WM_DESTROY => {
+            notes::shutdown();
+            UnregisterHotKey(hwnd, NOTES_HOTKEY_ID);
             notify_icon(hwnd, false);
             WINDOW.store(0, Ordering::Relaxed);
             PostQuitMessage(0);
@@ -236,7 +333,7 @@ pub fn run_tray(state: Arc<State>, port: u16, show: bool) -> Result<(), String> 
         .map_err(|_| "Tray already running".to_string())?;
     PORT.set(port)
         .map_err(|_| "Tray already configured".to_string())?;
-    let class_name = wide("SnapToPromptTrayWin32");
+    let class_name = wide("MyToolsAgentWin32");
     let mut class: WNDCLASSW = unsafe { zeroed() };
     class.lpfnWndProc = Some(wndproc);
     class.lpszClassName = class_name.as_ptr();
@@ -247,7 +344,7 @@ pub fn run_tray(state: Arc<State>, port: u16, show: bool) -> Result<(), String> 
         let hwnd = CreateWindowExW(
             0,
             class_name.as_ptr(),
-            wide("Snap to Prompt").as_ptr(),
+            wide("My Tools - Background Agent").as_ptr(),
             0,
             0,
             0,
@@ -262,14 +359,28 @@ pub fn run_tray(state: Arc<State>, port: u16, show: bool) -> Result<(), String> 
             return Err("Cannot create tray message window".into());
         }
         WINDOW.store(hwnd as isize, Ordering::Relaxed);
+        migrate_legacy_startup();
         if !notify_icon(hwnd, true) {
             return Err("Cannot add Windows tray icon".into());
+        }
+        if RegisterHotKey(
+            hwnd,
+            NOTES_HOTKEY_ID,
+            MOD_CONTROL | MOD_ALT | MOD_NOREPEAT,
+            'P' as u32,
+        ) == 0
+        {
+            error_dialog("Ctrl+Alt+P is already in use. Prompt Notes is still available from the tray menu or My Tools desktop hub.");
         }
         if show {
             show_pairing();
         }
+        update::spawn_auto_checks();
         let mut message: MSG = zeroed();
         while GetMessageW(&mut message, null_mut(), 0, 0) > 0 {
+            if notes::handle_key(message.hwnd, message.message, message.wParam) {
+                continue;
+            }
             TranslateMessage(&message);
             DispatchMessageW(&message);
         }
@@ -341,10 +452,21 @@ pub fn copy_and_paste(image: &DynamicImage, auto: bool) -> Result<&'static str, 
     if !auto {
         return Ok("Photo copied to clipboard (auto-paste is off)");
     }
+    if notes::is_popup_foreground() {
+        return Err("Prompt Notes is focused; image copied to clipboard. Focus your AI input before snapping.".into());
+    }
     std::thread::sleep(Duration::from_millis(120));
+    if !send_paste_shortcut() {
+        return Err("Ctrl+V unavailable; image remains on clipboard".into());
+    }
+    Ok("Ctrl+V sent to focused PC window")
+}
+
+/// Also used by Prompt Notes after restoring the previous application's focus.
+pub fn send_paste_shortcut() -> bool {
     unsafe {
         if GetForegroundWindow().is_null() {
-            return Err("No active Windows app; image remains on clipboard".into());
+            return false;
         }
         let keyboard = |vk: u16, release: bool| INPUT {
             r#type: INPUT_KEYBOARD,
@@ -370,10 +492,10 @@ pub fn copy_and_paste(image: &DynamicImage, auto: bool) -> Result<&'static str, 
             size_of::<INPUT>() as i32,
         ) != inputs.len() as u32
         {
-            return Err("Ctrl+V unavailable; image remains on clipboard".into());
+            return false;
         }
     }
-    Ok("Ctrl+V sent to focused PC window")
+    true
 }
 
 #[cfg(test)]

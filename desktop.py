@@ -66,7 +66,7 @@ class DesktopApp:
 
     def pairing_url(self):
         # Token is a URL fragment (not sent in an HTTP request).
-        return self.base_url() + "/#pair=" + self.state.token
+        return self.base_url() + "/tools/snap-to-paste-image/#pair=" + self.state.token
 
     def render(self):
         self.root.title("Snap to Prompt — PC Receiver")

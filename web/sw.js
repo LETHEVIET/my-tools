@@ -1,6 +1,6 @@
 // Only run on secure origins. Static resources only; never cache photos or /api calls.
-const CACHE = 'snap-shell-v2';
-const FILES = ['/', '/app.css', '/app.js', '/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png'];
+const CACHE = 'my-tools-shell-v1';
+const FILES = ['/', '/hub.css', '/tools/snap-to-paste-image/', '/tools/snap-to-paste-image/app.css', '/tools/snap-to-paste-image/app.js', '/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png'];
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(FILES)).then(() => self.skipWaiting()));
 });

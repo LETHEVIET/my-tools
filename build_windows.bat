@@ -8,4 +8,4 @@ if errorlevel 1 (
 )
 cargo build --release --locked --manifest-path rust\Cargo.toml
 if errorlevel 1 exit /b 1
-echo Built: rust\target\release\snap-to-prompt.exe
+echo Built: rust\target\release\my-tools-agent.exe

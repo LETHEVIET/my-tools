@@ -176,6 +176,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13d2233c9842d08cfe13f9eac96e207ca6a2ea10b80259ebe8ad0268be27d2af"
 
 [[package]]
+name = "my-tools-agent"
+version = "0.3.0"
+dependencies = [
+ "base64",
+ "getrandom",
+ "image",
+ "kamadak-exif",
+ "qrcode",
+ "tiny_http",
+ "windows-sys",
+]
+
+[[package]]
 name = "num-traits"
 version = "0.2.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -220,19 +233,6 @@ name = "simd-adler32"
 version = "0.3.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a219298ac11a56ea9a6d2120044824d6f01aeb034955e7af7bc16858527deea"
-
-[[package]]
-name = "snap-to-prompt"
-version = "0.2.0"
-dependencies = [
- "base64",
- "getrandom",
- "image",
- "kamadak-exif",
- "qrcode",
- "tiny_http",
- "windows-sys",
-]
 
 [[package]]
 name = "tiny_http"

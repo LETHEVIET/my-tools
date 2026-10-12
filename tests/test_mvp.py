@@ -75,13 +75,16 @@ class ServerTests(unittest.TestCase):
     def test_01_web_assets_and_pwa_manifest(self):
         status, data, headers = self.request('/')
         self.assertEqual(status, 200)
-        self.assertIn(b'libraryInput', data)
-        self.assertIn(b'liveVideo', data)
-        self.assertIn(b'nativeCameraInput', data)
+        self.assertIn(b'My Tools', data)
+        status, tool_page, _ = self.request('/tools/snap-to-paste-image/')
+        self.assertEqual(status, 200)
+        self.assertIn(b'libraryInput', tool_page)
+        self.assertIn(b'liveVideo', tool_page)
+        self.assertIn(b'nativeCameraInput', tool_page)
         self.assertEqual(headers['X-Content-Type-Options'], 'nosniff')
         status, raw, _ = self.request('/manifest.webmanifest')
         self.assertEqual(status, 200)
-        self.assertEqual(json.loads(raw)['name'], 'Snap to Prompt')
+        self.assertEqual(json.loads(raw)['name'], 'My Tools')
 
     def test_02_pairing_required(self):
         status, _, _ = self.request('/api/status')

@@ -1,0 +1,16 @@
+[package]
+name = "my-tools"
+version = "0.3.0"
+edition = "2021"
+
+[dependencies]
+gpui-kit = "=0.7.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 8
+opt-level = 2
+strip = "symbols"

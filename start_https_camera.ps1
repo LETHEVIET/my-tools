@@ -3,7 +3,7 @@
 param([int]$Port = 8765)
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
-$exe = Join-Path $PSScriptRoot "rust\target\release\snap-to-prompt.exe"
+$exe = Join-Path $PSScriptRoot "rust\target\release\my-tools-agent.exe"
 if (-not (Test-Path $exe)) {
     throw "Build the receiver first with build_windows.bat."
 }
@@ -12,10 +12,10 @@ if (-not $cloudflared) {
     throw "Install cloudflared first (winget install Cloudflare.cloudflared). Then reopen PowerShell."
 }
 if (Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue) {
-    throw "Port $Port is already in use. Exit Snap to Prompt from its tray menu before starting HTTPS mode."
+    throw "Port $Port is already in use. Exit My Tools from its tray menu before starting HTTPS mode."
 }
-$stderr = Join-Path $env:TEMP "snap-to-prompt-cloudflared-$PID.log"
-$stdout = Join-Path $env:TEMP "snap-to-prompt-cloudflared-$PID.out"
+$stderr = Join-Path $env:TEMP "my-tools-cloudflared-$PID.log"
+$stdout = Join-Path $env:TEMP "my-tools-cloudflared-$PID.out"
 $tunnel = $null
 $receiver = $null
 try {
