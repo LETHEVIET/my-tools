@@ -38,10 +38,10 @@ For example, after editing the code and bumping both manifest versions to `0.7.1
 
 ```powershell
 git add -A
-git commit -m "Release v0.7.1"
+git commit -m "Release v0.8.1"
 git push origin main
-git tag -a v0.7.1 -m "My Tools v0.7.1"
-git push origin v0.7.1
+git tag -a v0.8.1 -m "My Tools v0.8.1"
+git push origin v0.8.1
 ```
 
 Developer builds (`build_windows.bat`, `start_windows.bat`, `start_hub_windows.bat`) are not automatically replaced during updates. All feature behavior is inside the `desktop/target/release/my-tools.exe` binary, even though the repository keeps a small `rust/` crate for testing native helper logic.

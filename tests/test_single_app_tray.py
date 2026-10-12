@@ -104,6 +104,18 @@ class SingleAppTrayTest(unittest.TestCase):
                 until(lambda: user32.IsWindowVisible(hub))
                 self.assertIsNone(proc.poll())
 
+                # Global Quick Launcher is also accessible through the tray.
+                self.assertTrue(user32.PostMessageW(tray, 0x0111, 1011, 0))
+                palette = until(lambda: owned_window(None, "Quick Launcher - My Tools", proc.pid))
+                self.assertTrue(user32.IsWindowVisible(palette))
+                self.assertTrue(user32.PostMessageW(palette, 0x0010, 0, 0))
+                until(lambda: not owned_window(None, "Quick Launcher - My Tools", proc.pid))
+
+                # Quick Tasks navigation reuses the existing GPUI dashboard.
+                self.assertTrue(user32.PostMessageW(tray, 0x0111, 1012, 0))
+                until(lambda: user32.IsWindowVisible(hub))
+                self.assertIsNone(proc.poll())
+
                 # True exit cleans up the tray and exits the one process.
                 self.assertTrue(user32.PostMessageW(tray, 0x0111, 1005, 0))  # WM_COMMAND / Exit
                 self.assertEqual(proc.wait(timeout=10), 0)

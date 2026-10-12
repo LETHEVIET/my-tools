@@ -14,6 +14,8 @@ mod quick_notes_store;
 #[cfg(windows)]
 mod receiver;
 #[cfg(windows)]
+mod tasks;
+#[cfg(windows)]
 mod tools;
 #[cfg(windows)]
 mod update;

@@ -22,24 +22,25 @@ use windows_sys::Win32::System::Registry::{
 use windows_sys::Win32::System::Threading::CreateMutexW;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     RegisterHotKey, SendInput, UnregisterHotKey, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT,
-    KEYEVENTF_KEYUP, MOD_ALT, MOD_CONTROL, MOD_NOREPEAT, VK_CONTROL,
+    KEYEVENTF_KEYUP, MOD_ALT, MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT, VK_CONTROL,
 };
 use windows_sys::Win32::UI::Shell::{
-    ShellExecuteW, Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE,
-    NOTIFYICONDATAW,
+    ShellExecuteW, Shell_NotifyIconW, NIF_ICON, NIF_INFO, NIF_MESSAGE, NIF_TIP, NIIF_INFO, NIM_ADD,
+    NIM_DELETE, NIM_MODIFY, NIN_BALLOONUSERCLICK, NOTIFYICONDATAW,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyWindow,
-    DispatchMessageW, FindWindowW, GetCursorPos, GetForegroundWindow, GetMessageW, LoadIconW,
-    MessageBoxW, PostMessageW, PostQuitMessage, RegisterClassW, SetForegroundWindow, ShowWindow,
-    TrackPopupMenu, TranslateMessage, IDI_APPLICATION, MB_ICONERROR, MB_ICONINFORMATION, MB_OK,
-    MF_CHECKED, MF_SEPARATOR, MF_STRING, MSG, SW_HIDE, SW_RESTORE, SW_SHOWNORMAL, TPM_RIGHTBUTTON,
-    WM_APP, WM_CLOSE, WM_COMMAND, WM_DESTROY, WM_HOTKEY, WM_LBUTTONDBLCLK, WM_RBUTTONUP, WM_USER,
-    WNDCLASSW,
+    DispatchMessageW, FindWindowW, GetCursorPos, GetForegroundWindow, GetMessageW, KillTimer,
+    LoadIconW, MessageBoxW, PostMessageW, PostQuitMessage, RegisterClassW, SetForegroundWindow,
+    SetTimer, ShowWindow, TrackPopupMenu, TranslateMessage, IDI_APPLICATION, MB_ICONERROR,
+    MB_ICONINFORMATION, MB_OK, MF_CHECKED, MF_SEPARATOR, MF_STRING, MSG, SW_HIDE, SW_RESTORE,
+    SW_SHOWNORMAL, TPM_RIGHTBUTTON, WM_APP, WM_CLOSE, WM_COMMAND, WM_DESTROY, WM_HOTKEY,
+    WM_LBUTTONDBLCLK, WM_RBUTTONUP, WM_TIMER, WM_USER, WNDCLASSW,
 };
 
 use crate::notes;
 use crate::receiver::State;
+use crate::tasks;
 use crate::update;
 
 const TRAY_CALLBACK: u32 = WM_USER + 29;
@@ -51,10 +52,36 @@ const AUTOSTART: usize = 1004;
 const EXIT: usize = 1005;
 const OPEN_NOTES: usize = 1006;
 const OPEN_QUICK_NOTE: usize = 1010;
+const OPEN_LAUNCHER: usize = 1011;
+const OPEN_TASKS: usize = 1012;
 const CHECK_UPDATES: usize = 1007;
 const AUTO_UPDATES: usize = 1008;
 const NOTES_HOTKEY_ID: i32 = 771;
 const QUICK_HOTKEY_ID: i32 = 772;
+const LAUNCHER_HOTKEY_ID: i32 = 773;
+const TASK_TIMER_ID: usize = 9051;
+static GPUI_LAUNCHER: OnceLock<fn()> = OnceLock::new();
+static GPUI_TASKS: OnceLock<fn()> = OnceLock::new();
+
+pub fn register_gpui_launcher(handler: fn()) {
+    let _ = GPUI_LAUNCHER.set(handler);
+}
+pub fn register_gpui_tasks(handler: fn()) {
+    let _ = GPUI_TASKS.set(handler);
+}
+
+fn show_launcher() {
+    if let Some(handler) = GPUI_LAUNCHER.get() {
+        handler();
+    }
+}
+fn show_tasks() {
+    if let Some(handler) = GPUI_TASKS.get() {
+        handler();
+    } else {
+        show_hub();
+    }
+}
 pub const WM_OPEN_NOTES: u32 = WM_APP + 42;
 pub const WM_OPEN_QUICK_NOTE: u32 = WM_APP + 44;
 const WM_APP_EXIT: u32 = WM_APP + 43;
@@ -306,6 +333,43 @@ fn notify_icon(hwnd: HWND, add: bool) -> bool {
     unsafe { Shell_NotifyIconW(if add { NIM_ADD } else { NIM_DELETE }, &icon) != 0 }
 }
 
+/// Windows notification using the existing My Tools tray icon, not another
+/// background process or console. Windows may suppress balloons under Focus
+/// Assist / Do Not Disturb; those settings belong to the user.
+fn task_balloon(hwnd: HWND, title: &str) -> bool {
+    let mut data: NOTIFYICONDATAW = unsafe { zeroed() };
+    data.cbSize = size_of::<NOTIFYICONDATAW>() as u32;
+    data.hWnd = hwnd;
+    data.uID = 1;
+    data.uFlags = NIF_INFO;
+    data.dwInfoFlags = NIIF_INFO;
+    let label = wide("My Tools · Task due");
+    data.szInfoTitle[..label.len()].copy_from_slice(&label);
+    let description = wide(&format!(
+        "{} · Click to view Quick Tasks",
+        title.chars().take(160).collect::<String>()
+    ));
+    let count = description.len().min(data.szInfo.len());
+    data.szInfo[..count].copy_from_slice(&description[..count]);
+    data.szInfo[count - 1] = 0;
+    unsafe { Shell_NotifyIconW(NIM_MODIFY, &data) != 0 }
+}
+
+fn check_due_tasks(hwnd: HWND) {
+    match tasks::due() {
+        Ok(due) => {
+            for task in due.into_iter().take(1) {
+                if task_balloon(hwnd, &task.title) {
+                    if let Err(error) = tasks::mark_notified(task.id) {
+                        eprintln!("Cannot mark task as notified: {error}");
+                    }
+                }
+            }
+        }
+        Err(error) => eprintln!("Could not check Quick Tasks reminders: {error}"),
+    }
+}
+
 fn menu(hwnd: HWND) {
     unsafe {
         let menu = CreatePopupMenu();
@@ -340,6 +404,13 @@ fn menu(hwnd: HWND) {
             OPEN_QUICK_NOTE,
             wide("Quick Note   Ctrl+Alt+N").as_ptr(),
         );
+        AppendMenuW(
+            menu,
+            MF_STRING,
+            OPEN_LAUNCHER,
+            wide("Quick Launcher   Ctrl+Shift+Space").as_ptr(),
+        );
+        AppendMenuW(menu, MF_STRING, OPEN_TASKS, wide("Quick Tasks").as_ptr());
         AppendMenuW(
             menu,
             MF_STRING,
@@ -379,6 +450,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             match lparam as u32 {
                 WM_RBUTTONUP => menu(hwnd),
                 WM_LBUTTONDBLCLK => show_hub(),
+                NIN_BALLOONUSERCLICK => show_tasks(),
                 _ => {}
             }
             0
@@ -389,6 +461,14 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         }
         WM_HOTKEY if wparam == QUICK_HOTKEY_ID as usize => {
             notes::show(hwnd, true, true);
+            0
+        }
+        WM_HOTKEY if wparam == LAUNCHER_HOTKEY_ID as usize => {
+            show_launcher();
+            0
+        }
+        WM_TIMER if wparam == TASK_TIMER_ID => {
+            check_due_tasks(hwnd);
             0
         }
         WM_OPEN_NOTES => {
@@ -410,6 +490,8 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 SHOW => show_pairing(),
                 OPEN_NOTES => notes::show(hwnd, false, false),
                 OPEN_QUICK_NOTE => notes::show(hwnd, false, true),
+                OPEN_LAUNCHER => show_launcher(),
+                OPEN_TASKS => show_tasks(),
                 CHECK_UPDATES => {
                     if let Err(message) = update::check_now(true) {
                         error_dialog(&message);
@@ -456,6 +538,8 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             notes::shutdown();
             UnregisterHotKey(hwnd, NOTES_HOTKEY_ID);
             UnregisterHotKey(hwnd, QUICK_HOTKEY_ID);
+            UnregisterHotKey(hwnd, LAUNCHER_HOTKEY_ID);
+            KillTimer(hwnd, TASK_TIMER_ID);
             notify_icon(hwnd, false);
             WINDOW.store(0, Ordering::Relaxed);
             PostQuitMessage(0);
@@ -519,6 +603,17 @@ pub fn run_tray(state: Arc<State>, port: u16, show: bool) -> Result<(), String> 
         {
             error_dialog("Ctrl+Alt+N is already in use. Quick Note is still available from the tray menu or the My Tools hub.");
         }
+        if RegisterHotKey(
+            hwnd,
+            LAUNCHER_HOTKEY_ID,
+            MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT,
+            0x20, // Space
+        ) == 0
+        {
+            error_dialog("Ctrl+Shift+Space is in use. Quick Launcher is still available from the My Tools tray menu.");
+        }
+        SetTimer(hwnd, TASK_TIMER_ID, 30_000, None);
+        check_due_tasks(hwnd);
         if show {
             show_pairing();
         }

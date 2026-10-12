@@ -21,6 +21,9 @@ mod quick_notes_store;
 #[path = "../../rust/src/receiver.rs"]
 mod receiver;
 #[cfg(windows)]
+#[path = "../../rust/src/tasks.rs"]
+mod tasks;
+#[cfg(windows)]
 #[path = "../../rust/src/tools.rs"]
 mod tools;
 #[cfg(windows)]
@@ -72,6 +75,8 @@ fn open_notes(_quick: bool) -> Result<&'static str, String> {
 
 mod hub;
 #[cfg(windows)]
+mod launcher;
+#[cfg(windows)]
 mod note_window;
 #[cfg(windows)]
 mod ui_bridge;
@@ -102,6 +107,8 @@ fn main() {
         }
         notes::register_gpui_open(ui_bridge::request_note);
         win::register_gpui_pairing(ui_bridge::request_pairing);
+        win::register_gpui_launcher(ui_bridge::request_launcher);
+        win::register_gpui_tasks(ui_bridge::request_tasks);
         std::thread::Builder::new()
             .name("my-tools-tray".into())
             .spawn(|| {
@@ -116,6 +123,8 @@ fn main() {
         init(cx);
         #[cfg(windows)]
         note_window::init(cx);
+        #[cfg(windows)]
+        launcher::init(cx);
         let options = WindowOptions {
             titlebar: Some(TitlebarOptions {
                 title: Some(win::hub_title().into()),

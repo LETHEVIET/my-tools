@@ -30,6 +30,12 @@ and a pin-to-top action. Existing Quick Note `.txt` files are imported once
 into `%LOCALAPPDATA%\MyTools\my-tools.db` without deleting the originals.
 See [NOTES_DATABASE.md](NOTES_DATABASE.md) for backup and migration details.
 
+**New in v0.8.0:** **Quick Launcher** (`Ctrl+Shift+Space`) is a GPUI Kit
+command palette for finding tools, saved notes, and tasks. **Quick Tasks**
+adds a Today/Upcoming/Completed task list, optional due times, and Windows
+tray reminders while My Tools runs. Both use the local SQLite database.
+See [QUICK_LAUNCHER_TASKS.md](QUICK_LAUNCHER_TASKS.md).
+
 ## Install
 
 Get the latest **`my-tools.exe`** from the public [GitHub Releases](https://github.com/LETHEVIET/my-tools/releases). Run it directly without an installer script. To enable startup and automatic updates, click **Install My Tools for startup and automatic updates** inside the hub. See [UPDATE_GUIDE.md](UPDATE_GUIDE.md). Updates download over HTTPS without GitHub CLI or authentication.

@@ -32,7 +32,15 @@ pub const QUICK_NOTE: Tool = Tool {
     upload_path: "",
 };
 
-pub const ALL: &[Tool] = &[SNAP_TO_PASTE_IMAGE, PROMPT_NOTES, QUICK_NOTE];
+pub const QUICK_TASKS: Tool = Tool {
+    id: "quick-tasks",
+    label: "Quick Tasks",
+    mobile_path: "",
+    status_path: "",
+    upload_path: "",
+};
+
+pub const ALL: &[Tool] = &[SNAP_TO_PASTE_IMAGE, PROMPT_NOTES, QUICK_NOTE, QUICK_TASKS];
 
 pub fn catalog_json() -> String {
     let tools = ALL
@@ -65,7 +73,7 @@ mod tests {
 
     #[test]
     fn image_routes_are_stable_and_namespaced() {
-        assert_eq!(ALL.len(), 3);
+        assert_eq!(ALL.len(), 4);
         assert_eq!(ALL[0].id, "snap-to-paste-image");
         assert!(is_image_status_route("/api/status"));
         assert!(is_image_status_route(SNAP_TO_PASTE_IMAGE.status_path));
@@ -75,5 +83,6 @@ mod tests {
         assert!(catalog_json().contains("Snap to Paste Image"));
         assert!(catalog_json().contains("\"id\":\"prompt-notes\""));
         assert!(catalog_json().contains("\"id\":\"quick-note\""));
+        assert!(catalog_json().contains("\"id\":\"quick-tasks\""));
     }
 }

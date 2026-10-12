@@ -115,6 +115,12 @@ fn connect(path: &Path) -> Result<Connection, String> {
     Ok(conn)
 }
 
+/// Share the same local SQLite database with quick tasks and future tools.
+/// The notes schema and legacy migration are initialized before use.
+pub fn open_db() -> Result<Connection, String> {
+    connect(&database_path()?)
+}
+
 /// One transaction imports all old files; the completion marker is committed
 /// alongside the notes, so interrupted imports can retry without duplication.
 /// The original .txt files are never removed or modified.

@@ -1,6 +1,6 @@
 //! My Tools application shell. Uses GPUI Kit's Sidebar, Button, Badge, Icon and
 //! built-in system theme rather than custom styling or a second UI runtime.
-use super::{install, open_notes, quick_notes_store, receiver_online, win};
+use super::{install, open_notes, quick_notes_store, receiver_online, tasks, win};
 use gpui_kit::base::StyledExt as _;
 use gpui_kit::component::{
     badge::Badge,
@@ -21,6 +21,7 @@ enum Page {
     Prompt,
     Quick,
     Saved,
+    Tasks,
     Settings,
 }
 
@@ -32,6 +33,7 @@ impl Page {
             Self::Prompt => "Prompt Notes",
             Self::Quick => "Quick Note",
             Self::Saved => "Saved Notes",
+            Self::Tasks => "Quick Tasks",
             Self::Settings => "Settings & updates",
         }
     }
@@ -43,6 +45,7 @@ impl Page {
             Self::Prompt => "Compose first, then paste only when you're ready.",
             Self::Quick => "Write something down without sending or pasting it anywhere.",
             Self::Saved => "Your local collection of saved quick notes.",
+            Self::Tasks => "Capture, finish, and remember what matters.",
             Self::Settings => "Keep My Tools running, paired and up to date.",
         }
     }
@@ -58,6 +61,10 @@ pub(super) struct Hub {
     tags: Entity<InputState>,
     body: Entity<TextareaState>,
     _search_subscription: Subscription,
+    task_title: Entity<InputState>,
+    task_due: Entity<InputState>,
+    task_filter: tasks::TaskFilter,
+    task_items: Vec<tasks::Task>,
     collapsed: bool,
 }
 
@@ -67,6 +74,8 @@ impl Hub {
         let title = cx.new(|cx| InputState::new(window, cx));
         let tags = cx.new(|cx| InputState::new(window, cx));
         let body = cx.new(|cx| TextareaState::new(window, cx));
+        let task_title = cx.new(|cx| InputState::new(window, cx));
+        let task_due = cx.new(|cx| InputState::new(window, cx));
         let _search_subscription = cx.subscribe(&search, |this, _, event: &InputEvent, cx| {
             if matches!(event, InputEvent::Change) {
                 this.refresh_saved(cx);
@@ -90,6 +99,10 @@ impl Hub {
             tags,
             body,
             _search_subscription,
+            task_title,
+            task_due,
+            task_filter: tasks::TaskFilter::Today,
+            task_items: tasks::list(tasks::TaskFilter::Today, "").unwrap_or_default(),
             collapsed: false,
         }
     }
@@ -98,7 +111,109 @@ impl Hub {
         self.page = page;
         if page == Page::Saved {
             self.refresh_saved(cx);
+        } else if page == Page::Tasks {
+            self.refresh_tasks();
         }
+        cx.notify();
+    }
+
+    pub(super) fn show_tasks_page(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.navigate(Page::Tasks, cx);
+        self.task_title.read(cx).focus_handle(cx).focus(window, cx);
+    }
+
+    pub(super) fn show_selected_task(&mut self, id: i64, cx: &mut Context<Self>) {
+        self.task_filter = tasks::TaskFilter::All;
+        self.navigate(Page::Tasks, cx);
+        match tasks::get(id) {
+            Ok(Some(task)) => {
+                self.task_items = vec![task];
+                self.status =
+                    "Opened task from Quick Launcher. Choose All to see every task.".into();
+            }
+            Ok(None) => self.status = "This task no longer exists.".into(),
+            Err(error) => self.status = error,
+        }
+        cx.notify();
+    }
+
+    pub(super) fn show_saved_note(&mut self, id: i64, window: &mut Window, cx: &mut Context<Self>) {
+        self.page = Page::Saved;
+        self.search
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        self.refresh_saved(cx);
+        self.pick_note(id, window, cx);
+    }
+
+    fn refresh_tasks(&mut self) {
+        match tasks::list(self.task_filter, "") {
+            Ok(items) => self.task_items = items,
+            Err(error) => self.status = format!("Cannot load tasks: {error}"),
+        }
+    }
+
+    fn choose_task_filter(&mut self, filter: tasks::TaskFilter, cx: &mut Context<Self>) {
+        self.task_filter = filter;
+        self.refresh_tasks();
+        cx.notify();
+    }
+
+    fn preset_tomorrow(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.task_due.update(cx, |input, cx| {
+            input.set_value(tasks::tomorrow_morning(), window, cx);
+        });
+    }
+
+    fn clear_due(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.task_due
+            .update(cx, |input, cx| input.set_value("", window, cx));
+    }
+
+    fn add_task(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let title = self.task_title.read(cx).value().to_string();
+        let due_text = self.task_due.read(cx).value().to_string();
+        let result = tasks::parse_local_due(&due_text).and_then(|due| tasks::add(&title, due));
+        match result {
+            Ok(_) => {
+                self.task_title
+                    .update(cx, |input, cx| input.set_value("", window, cx));
+                self.task_due
+                    .update(cx, |input, cx| input.set_value("", window, cx));
+                self.status = if due_text.trim().is_empty() {
+                    "Task saved. Add a reminder date if you'd like a Windows notification.".into()
+                } else {
+                    "Task saved. The Windows tray will remind you when it is due.".into()
+                };
+                self.task_filter = tasks::TaskFilter::All;
+                self.refresh_tasks();
+            }
+            Err(error) => self.status = error,
+        }
+        cx.notify();
+    }
+
+    fn complete_task(&mut self, id: i64, done: bool, cx: &mut Context<Self>) {
+        self.status = match tasks::set_completed(id, done) {
+            Ok(()) => if done {
+                "Task completed."
+            } else {
+                "Task reopened."
+            }
+            .into(),
+            Err(error) => error,
+        };
+        self.refresh_tasks();
+        cx.notify();
+    }
+
+    fn reschedule_task(&mut self, id: i64, cx: &mut Context<Self>) {
+        let due = self.task_due.read(cx).value().to_string();
+        self.status = match tasks::parse_local_due(&due).and_then(|due| tasks::reschedule(id, due))
+        {
+            Ok(()) => "Reminder updated.".into(),
+            Err(error) => error,
+        };
+        self.refresh_tasks();
         cx.notify();
     }
 
@@ -272,6 +387,14 @@ impl Hub {
                                 .active(active == Page::Saved)
                                 .on_click(
                                     cx.listener(|this, _, _, cx| this.navigate(Page::Saved, cx)),
+                                ),
+                        )
+                        .child(
+                            SidebarMenuItem::new("Quick Tasks")
+                                .icon(IconName::Check)
+                                .active(active == Page::Tasks)
+                                .on_click(
+                                    cx.listener(|this, _, _, cx| this.navigate(Page::Tasks, cx)),
                                 ),
                         ),
                 ),
@@ -465,7 +588,7 @@ impl Hub {
                 div().flex().flex_col().gap_3()
                     .child(div().flex().justify_between().items_center()
                         .child(div().text_sm().text_color(theme.muted_foreground).child("Available tools"))
-                        .child(Badge::new().count(3)))
+                        .child(Badge::new().count(4)))
                     .child(self.tool_card("Snap to Paste Image",
                         "Capture a photo on iPhone and paste it into the active AI prompt.", "iPhone → Windows",
                         IconName::FileText,
@@ -489,6 +612,16 @@ impl Hub {
                                 .child(format!("{} local notes, never uploaded", self.notes.len()))))
                         .child(Button::new("home-saved").label("Browse notes")
                             .on_click(cx.listener(|this, _, _, cx| this.navigate(Page::Saved, cx)))))
+                    .child(Button::new("home-launcher").label("Quick Launcher · Ctrl+Shift+Space")
+                        .on_click(|_,_,_| crate::ui_bridge::request_launcher()))
+                    .child(div().p_4().rounded_xl().border_1().border_color(theme.border)
+                        .flex().items_center().justify_between()
+                        .child(div().flex().flex_col().gap_1()
+                            .child(div().font_bold().child("Quick Tasks & reminders"))
+                            .child(div().text_sm().text_color(theme.muted_foreground)
+                                .child("Today's tasks, upcoming deadlines, and completed work")))
+                        .child(Button::new("home-tasks").label("Open tasks")
+                            .on_click(cx.listener(|this, _, _, cx| this.navigate(Page::Tasks, cx)))))
                     .into_any_element()
             }
             Page::Photo => div().flex().flex_col().gap_3()
@@ -576,6 +709,68 @@ impl Hub {
                                         .label(if pinned { "Unpin" } else { "Pin to top" })
                                         .on_click(cx.listener(|this, _, _, cx| this.toggle_pin(cx))))))
                         ))
+                    .into_any_element()
+            }
+            Page::Tasks => {
+                let items = self.task_items.clone();
+                let filter = self.task_filter;
+                div().flex().flex_col().gap_3()
+                    .child(div().text_sm().font_bold().child("Capture a task"))
+                    .child(div().text_xs().text_color(theme.muted_foreground)
+                        .child("What do you need to do?"))
+                    .child(Input::new(&self.task_title).aria_label("Task description"))
+                    .child(div().text_xs().text_color(theme.muted_foreground)
+                        .child("Optional reminder: YYYY-MM-DD HH:MM (your local time). Leave blank for no reminder."))
+                    .child(Input::new(&self.task_due).aria_label("Optional task reminder date and time"))
+                    .child(div().flex().gap_2().flex_wrap().items_center()
+                        .child(Button::new("task-tomorrow").label("Tomorrow 9 AM")
+                            .on_click(cx.listener(|this, _, window, cx| this.preset_tomorrow(window, cx))))
+                        .child(Button::new("task-no-reminder").label("No reminder")
+                            .on_click(cx.listener(|this, _, window, cx| this.clear_due(window, cx))))
+                        .child(Button::new("task-add").primary().label("Add task")
+                            .on_click(cx.listener(|this, _, window, cx| this.add_task(window, cx)))))
+                    .child(div().flex().items_center().justify_between().gap_2()
+                        .child(div().text_sm().font_bold().child("Your tasks"))
+                        .child(Button::new("tasks-refresh").label("Refresh")
+                            .on_click(cx.listener(|this, _, _, cx| { this.refresh_tasks(); cx.notify(); }))))
+                    .child(div().flex().gap_2().flex_wrap()
+                        .children([
+                            (tasks::TaskFilter::Today, "Today"),
+                            (tasks::TaskFilter::Upcoming, "Upcoming"),
+                            (tasks::TaskFilter::Completed, "Completed"),
+                            (tasks::TaskFilter::All, "All"),
+                        ].into_iter().map(|(mode,label)| {
+                            Button::new(format!("tasks-filter-{label}")).label(label)
+                                .when(filter==mode, |b| b.primary())
+                                .on_click(cx.listener(move |this, _, _, cx| this.choose_task_filter(mode,cx)))
+                                .into_any_element()
+                        })))
+                    .when(items.is_empty(), |this| this.child(
+                        div().p_4().rounded_lg().border_1().border_color(theme.border)
+                            .text_sm().text_color(theme.muted_foreground)
+                            .child("No tasks in this view. Add one above to get started.")
+                    ))
+                    .children(items.into_iter().map(|task| {
+                        let id=task.id;
+                        let done=task.completed_at.is_some();
+                        let due=tasks::local_due_label(task.due_at);
+                        let overdue=!done && task.due_at.is_some_and(|time| time <= tasks::now_ms());
+                        div().p_3().rounded_lg().border_1().border_color(theme.border)
+                            .flex().items_center().justify_between().gap_2()
+                            .child(div().flex_1().min_w_0().flex().flex_col().gap_1()
+                                .child(div().font_bold().child(task.title))
+                                .child(div().text_xs().text_color(theme.muted_foreground)
+                                    .child(if done { "Completed".into() } else if overdue {
+                                        format!("Overdue · {due}")
+                                    } else { due })))
+                            .child(Button::new(format!("task-done-{id}"))
+                                .label(if done { "Reopen" } else { "Done" })
+                                .on_click(cx.listener(move |this, _, _, cx| this.complete_task(id,!done,cx))))
+                            .when(!done, |this| this.child(
+                                Button::new(format!("task-reschedule-{id}")).label("Set due")
+                                    .on_click(cx.listener(move |this, _, _, cx| this.reschedule_task(id,cx)))
+                            ))
+                    }))
                     .into_any_element()
             }
             Page::Settings => div().flex().flex_col().gap_4()

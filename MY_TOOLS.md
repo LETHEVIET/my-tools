@@ -14,6 +14,13 @@ The SVG logo source is `desktop/assets/my-tools.svg`; generated
 `desktop/assets/my-tools.ico` is included as an EXE resource and in the tray.
 The same artwork supplies the iPhone home-screen icons.
 
+**Quick Launcher and Quick Tasks (v0.8.0):** Press **Ctrl+Shift+Space** to open
+a floating GPUI Kit palette for tools, saved notes, and tasks. The new
+**Quick Tasks** sidebar page captures tasks with optional due times and
+shows Today/Upcoming/Completed views. The tray checks for due tasks every
+30 seconds while My Tools is running. See
+[QUICK_LAUNCHER_TASKS.md](QUICK_LAUNCHER_TASKS.md).
+
 The download is the executable alone; no second EXE, ZIP unpacking, or installer script is required. Optionally click **Install My Tools** inside the app to copy itself to `%LOCALAPPDATA%\Programs\MyTools` and enable tray startup and public GitHub HTTPS updates. See [UPDATE_GUIDE.md](UPDATE_GUIDE.md).
 
 **GitHub CI/CD and the release updater:** see [UPDATE_GUIDE.md](UPDATE_GUIDE.md). The source repository and release downloads are public. The installed app checks for updates over HTTPS without GitHub CLI or authentication.
