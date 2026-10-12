@@ -213,7 +213,7 @@ impl Render for Palette {
         let entries = self.results.clone();
         div()
             .size_full()
-            .bg(theme.background)
+            .bg(rgb(0xffffff))
             .text_color(theme.foreground)
             .p_4()
             .flex()
@@ -271,7 +271,11 @@ impl Render for Palette {
                             .p_2()
                             .border_1()
                             .border_color(theme.border)
-                            .when(index == selected, |view| view.bg(theme.secondary))
+                            .bg(if index == selected {
+                                theme.sidebar_accent
+                            } else {
+                                theme.background
+                            })
                             .child(
                                 div()
                                     .flex_1()

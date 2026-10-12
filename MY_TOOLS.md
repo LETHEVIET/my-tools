@@ -8,8 +8,16 @@ Overview, each tool, **Saved Notes** and Settings. Saved Notes now uses
 controls. Saved notes live in `%LOCALAPPDATA%\MyTools\my-tools.db`; existing
 legacy `.txt` notes are imported once and never deleted. Use **Data folder**
 to open local storage. See [NOTES_DATABASE.md](NOTES_DATABASE.md).
-The main window defaults to a compact 860 × 590 size, while Prompt Notes and
+The main window defaults to 980 × 650, while Prompt Notes and
 Quick Note each use a 560 × 405 GPUI Kit-themed editor window.
+
+**Visual refresh (v0.8.1):** The main hub now defaults to 980 × 650 for a
+balanced two-pane workspace, with a warm-light GPUI Kit palette, calm grouped
+navigation, rounded white work panels, and a clearer overview. Quick Tasks
+uses a master-detail list and a separate task/action panel; completing the
+last task due Today offers a dismissible success dialog. This is an interface
+change only: your SQLite files, shortcuts, tray, notes, and task data stay
+unchanged.
 The SVG logo source is `desktop/assets/my-tools.svg`; generated
 `desktop/assets/my-tools.ico` is included as an EXE resource and in the tray.
 The same artwork supplies the iPhone home-screen icons.

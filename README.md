@@ -8,7 +8,14 @@ Quick Notes without changing the clipboard. The app's icon is embedded in
 `my-tools.exe` and shown in the tray, and the iPhone launcher uses matching
 icons. The editable vector source is `desktop/assets/my-tools.svg`.
 
-The main window opens in a more compact **860 × 590** layout. Both notes tools
+**v0.8.1 visual refresh:** The app adopts a warm, understated light UI:
+a compact grouped sidebar, subtle white cards, a dashboard status overview,
+and a two-column Quick Tasks workspace inspired by modern review tools.
+Finishing the final task in **Today** shows a dismissible completion panel.
+The note editor and Quick Launcher use the same light theme and all existing
+actions continue to work. The main window defaults to **980 × 650**.
+
+Both notes tools
 now open a small **GPUI Kit themed text editor** instead of a separate Win32
 text-controls dialog. **Ctrl+S saves a new item to Saved Notes and closes**
 either editor. Prompt Notes also preserves its reusable working draft.

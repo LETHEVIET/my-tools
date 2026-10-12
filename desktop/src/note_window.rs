@@ -194,7 +194,7 @@ impl Render for NoteWindow {
             .flex()
             .flex_col()
             .gap_3()
-            .bg(theme.background)
+            .bg(rgb(0xffffff))
             .text_color(theme.foreground)
             .key_context(NOTE_CONTEXT)
             .on_action(cx.listener(|this, _: &SaveNote, window, cx| this.save(window, cx)))
@@ -214,6 +214,9 @@ impl Render for NoteWindow {
                     .flex()
                     .items_center()
                     .justify_between()
+                    .pb_3()
+                    .border_b_1()
+                    .border_color(theme.border)
                     .child(
                         div()
                             .flex()
@@ -260,6 +263,9 @@ impl Render for NoteWindow {
                     .flex()
                     .items_center()
                     .justify_between()
+                    .pt_3()
+                    .border_t_1()
+                    .border_color(theme.border)
                     .child(div().text_xs().text_color(theme.muted_foreground).child(
                         if self.quick {
                             "Ctrl+S saves and closes"

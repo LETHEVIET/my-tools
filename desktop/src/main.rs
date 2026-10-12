@@ -78,6 +78,7 @@ mod hub;
 mod launcher;
 #[cfg(windows)]
 mod note_window;
+mod style;
 #[cfg(windows)]
 mod ui_bridge;
 use hub::Hub;
@@ -121,6 +122,7 @@ fn main() {
     let initially_hidden = std::env::args().any(|arg| arg == "--minimized");
     application().with_assets(assets::Assets).run(move |cx| {
         init(cx);
+        style::apply(cx);
         #[cfg(windows)]
         note_window::init(cx);
         #[cfg(windows)]
@@ -131,7 +133,7 @@ fn main() {
                 ..Default::default()
             }),
             show: !initially_hidden,
-            window_bounds: Some(WindowBounds::centered(size(px(860.), px(590.)), cx)),
+            window_bounds: Some(WindowBounds::centered(size(px(980.), px(650.)), cx)),
             ..WindowOptions::default()
         };
         let handle = open_window(options, cx, |window, cx| {

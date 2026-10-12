@@ -44,7 +44,7 @@ impl Page {
             Self::Photo => "Capture on iPhone. Paste directly into your Windows AI prompt.",
             Self::Prompt => "Compose first, then paste only when you're ready.",
             Self::Quick => "Write something down without sending or pasting it anywhere.",
-            Self::Saved => "Your local collection of saved quick notes.",
+            Self::Saved => "Find, review and edit everything you've captured.",
             Self::Tasks => "Capture, finish, and remember what matters.",
             Self::Settings => "Keep My Tools running, paired and up to date.",
         }
@@ -65,6 +65,8 @@ pub(super) struct Hub {
     task_due: Entity<InputState>,
     task_filter: tasks::TaskFilter,
     task_items: Vec<tasks::Task>,
+    task_selected: Option<i64>,
+    day_complete: bool,
     collapsed: bool,
 }
 
@@ -103,12 +105,15 @@ impl Hub {
             task_due,
             task_filter: tasks::TaskFilter::Today,
             task_items: tasks::list(tasks::TaskFilter::Today, "").unwrap_or_default(),
+            task_selected: None,
+            day_complete: false,
             collapsed: false,
         }
     }
 
     fn navigate(&mut self, page: Page, cx: &mut Context<Self>) {
         self.page = page;
+        self.day_complete = false;
         if page == Page::Saved {
             self.refresh_saved(cx);
         } else if page == Page::Tasks {
@@ -125,6 +130,7 @@ impl Hub {
     pub(super) fn show_selected_task(&mut self, id: i64, cx: &mut Context<Self>) {
         self.task_filter = tasks::TaskFilter::All;
         self.navigate(Page::Tasks, cx);
+        self.task_selected = Some(id);
         match tasks::get(id) {
             Ok(Some(task)) => {
                 self.task_items = vec![task];
@@ -147,7 +153,18 @@ impl Hub {
 
     fn refresh_tasks(&mut self) {
         match tasks::list(self.task_filter, "") {
-            Ok(items) => self.task_items = items,
+            Ok(items) => {
+                if self
+                    .task_selected
+                    .is_some_and(|selected| !items.iter().any(|task| task.id == selected))
+                {
+                    self.task_selected = None;
+                }
+                if self.task_selected.is_none() {
+                    self.task_selected = items.first().map(|task| task.id);
+                }
+                self.task_items = items;
+            }
             Err(error) => self.status = format!("Cannot load tasks: {error}"),
         }
     }
@@ -155,6 +172,11 @@ impl Hub {
     fn choose_task_filter(&mut self, filter: tasks::TaskFilter, cx: &mut Context<Self>) {
         self.task_filter = filter;
         self.refresh_tasks();
+        cx.notify();
+    }
+
+    fn select_task(&mut self, id: i64, cx: &mut Context<Self>) {
+        self.task_selected = Some(id);
         cx.notify();
     }
 
@@ -174,7 +196,8 @@ impl Hub {
         let due_text = self.task_due.read(cx).value().to_string();
         let result = tasks::parse_local_due(&due_text).and_then(|due| tasks::add(&title, due));
         match result {
-            Ok(_) => {
+            Ok(id) => {
+                self.task_selected = Some(id);
                 self.task_title
                     .update(cx, |input, cx| input.set_value("", window, cx));
                 self.task_due
@@ -193,17 +216,118 @@ impl Hub {
     }
 
     fn complete_task(&mut self, id: i64, done: bool, cx: &mut Context<Self>) {
-        self.status = match tasks::set_completed(id, done) {
+        let result = tasks::set_completed(id, done);
+        self.status = match result.as_ref() {
             Ok(()) => if done {
                 "Task completed."
             } else {
                 "Task reopened."
             }
             .into(),
-            Err(error) => error,
+            Err(error) => error.clone(),
         };
         self.refresh_tasks();
+        if result.is_ok()
+            && done
+            && self.task_filter == tasks::TaskFilter::Today
+            && self.task_items.is_empty()
+        {
+            self.day_complete = true;
+        }
         cx.notify();
+    }
+
+    fn dismiss_completion(&mut self, cx: &mut Context<Self>) {
+        self.day_complete = false;
+        cx.notify();
+    }
+
+    fn completion_dialog(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = cx.theme().clone();
+        div()
+            .absolute()
+            .inset_0()
+            .bg(rgba(0x15171888))
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(
+                div()
+                    .w(px(440.))
+                    .bg(rgb(0xffffff))
+                    .rounded_xl()
+                    .border_1()
+                    .border_color(theme.border)
+                    .p_5()
+                    .flex()
+                    .flex_col()
+                    .gap_4()
+                    .child(
+                        div()
+                            .rounded_xl()
+                            .bg(rgb(0xe8efea))
+                            .p_4()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(div().text_2xl().text_color(rgb(0x448259)).child("✓")),
+                    )
+                    .child(
+                        div()
+                            .text_xl()
+                            .font_bold()
+                            .text_center()
+                            .child("Today is handled"),
+                    )
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_center()
+                            .text_color(theme.muted_foreground)
+                            .child("You finished the tasks due today. Enjoy the clear space."),
+                    )
+                    .child(
+                        div()
+                            .bg(theme.secondary)
+                            .rounded_lg()
+                            .p_4()
+                            .flex()
+                            .flex_col()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap_2()
+                                    .child(div().text_color(theme.success).child("✓"))
+                                    .child(div().text_sm().child("No unfinished tasks in Today")),
+                            )
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap_2()
+                                    .child(div().text_color(theme.success).child("✓"))
+                                    .child(div().text_sm().child("Your updates are saved locally")),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .gap_3()
+                            .child(
+                                Button::new("day-done-dismiss")
+                                    .primary()
+                                    .label("Back to tasks")
+                                    .on_click(
+                                        cx.listener(|this, _, _, cx| this.dismiss_completion(cx)),
+                                    ),
+                            )
+                            .child(Button::new("day-done-notes").label("Open notes").on_click(
+                                cx.listener(|this, _, _, cx| this.navigate(Page::Saved, cx)),
+                            )),
+                    ),
+            )
     }
 
     fn reschedule_task(&mut self, id: i64, cx: &mut Context<Self>) {
@@ -341,37 +465,64 @@ impl Hub {
         let active = self.page;
         let collapsed = self.collapsed;
         Sidebar::new("my-tools-navigation")
-            .w(px(212.))
+            .w(px(216.))
             .collapsible(true)
             .collapsed(collapsed)
             .header(
                 SidebarHeader::new().child(
                     div()
                         .flex()
-                        .items_center()
+                        .flex_col()
                         .gap_3()
-                        .px_2()
                         .py_2()
-                        .child(Icon::new(IconName::LayoutDashboard))
-                        .when(!collapsed, |this| {
-                            this.child(
-                                div()
-                                    .flex()
-                                    .flex_col()
-                                    .gap_1()
-                                    .child(div().font_bold().text_lg().child("My Tools"))
-                                    .child(
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap_3()
+                                .child(
+                                    div()
+                                        .size(px(34.))
+                                        .rounded_lg()
+                                        .bg(rgb(0x252525))
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .child(
+                                            div()
+                                                .text_lg()
+                                                .font_bold()
+                                                .text_color(rgb(0xffffff))
+                                                .child("✦"),
+                                        ),
+                                )
+                                .when(!collapsed, |view| {
+                                    view.child(
                                         div()
-                                            .text_xs()
-                                            .text_color(cx.theme().muted_foreground)
-                                            .child("PERSONAL WORKSPACE"),
-                                    ),
+                                            .flex()
+                                            .flex_col()
+                                            .gap_1()
+                                            .child(div().font_bold().child("My Tools"))
+                                            .child(
+                                                div()
+                                                    .text_xs()
+                                                    .text_color(cx.theme().muted_foreground)
+                                                    .child("Personal workspace"),
+                                            ),
+                                    )
+                                }),
+                        )
+                        .when(!collapsed, |view| {
+                            view.child(
+                                Button::new("sidebar-search")
+                                    .label("Search tools   /")
+                                    .on_click(|_, _, _| crate::ui_bridge::request_launcher()),
                             )
                         }),
                 ),
             )
             .child(
-                SidebarGroup::new("Workspace").child(
+                SidebarGroup::new("YOUR DAY").child(
                     SidebarMenu::new()
                         .child(
                             SidebarMenuItem::new("Overview")
@@ -379,14 +530,6 @@ impl Hub {
                                 .active(active == Page::Home)
                                 .on_click(
                                     cx.listener(|this, _, _, cx| this.navigate(Page::Home, cx)),
-                                ),
-                        )
-                        .child(
-                            SidebarMenuItem::new("Saved Notes")
-                                .icon(IconName::FolderOpen)
-                                .active(active == Page::Saved)
-                                .on_click(
-                                    cx.listener(|this, _, _, cx| this.navigate(Page::Saved, cx)),
                                 ),
                         )
                         .child(
@@ -400,7 +543,7 @@ impl Hub {
                 ),
             )
             .child(
-                SidebarGroup::new("Tools").child(
+                SidebarGroup::new("CAPTURE").child(
                     SidebarMenu::new()
                         .child(
                             SidebarMenuItem::new("Snap to Paste Image")
@@ -429,15 +572,24 @@ impl Hub {
                 ),
             )
             .child(
-                SidebarGroup::new("Preferences").child(
-                    SidebarMenu::new().child(
-                        SidebarMenuItem::new("Settings")
-                            .icon(IconName::Settings)
-                            .active(active == Page::Settings)
-                            .on_click(
-                                cx.listener(|this, _, _, cx| this.navigate(Page::Settings, cx)),
-                            ),
-                    ),
+                SidebarGroup::new("LIBRARY & SETTINGS").child(
+                    SidebarMenu::new()
+                        .child(
+                            SidebarMenuItem::new("Saved Notes")
+                                .icon(IconName::FolderOpen)
+                                .active(active == Page::Saved)
+                                .on_click(
+                                    cx.listener(|this, _, _, cx| this.navigate(Page::Saved, cx)),
+                                ),
+                        )
+                        .child(
+                            SidebarMenuItem::new("Settings")
+                                .icon(IconName::Settings)
+                                .active(active == Page::Settings)
+                                .on_click(
+                                    cx.listener(|this, _, _, cx| this.navigate(Page::Settings, cx)),
+                                ),
+                        ),
                 ),
             )
             .footer(
@@ -452,7 +604,7 @@ impl Hub {
                                 div()
                                     .text_xs()
                                     .text_color(cx.theme().muted_foreground)
-                                    .child("v0.7 · SQLite · System tray"),
+                                    .child("LOCAL FIRST  ·  v0.8.1"),
                             )
                         })
                         .child(
@@ -490,7 +642,7 @@ impl Hub {
             .rounded_xl()
             .border_1()
             .border_color(theme.border)
-            .bg(theme.secondary)
+            .bg(rgb(0xffffff))
             .child(
                 div()
                     .flex()
@@ -549,6 +701,7 @@ impl Hub {
             .rounded_xl()
             .border_1()
             .border_color(theme.border)
+            .bg(rgb(0xffffff))
             .p_4()
             .flex()
             .flex_col()
@@ -581,49 +734,250 @@ impl Hub {
             .into_any_element()
     }
 
+    /// A compact master-detail layout, inspired by the reference review
+    /// screen. Navigation stays left; meaningful work stays in the right pane.
+    fn task_workspace(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = cx.theme().clone();
+        let tasks = self.task_items.clone();
+        let selected = self.task_selected;
+        let details = selected
+            .and_then(|id| tasks.iter().find(|task| task.id == id))
+            .cloned();
+        let filter = self.task_filter;
+        div()
+            .flex()
+            .gap_4()
+            .min_h(px(445.))
+            .child(
+                div()
+                    .w(px(275.))
+                    .flex_shrink_0()
+                    .bg(rgb(0xffffff))
+                    .rounded_xl()
+                    .border_1()
+                    .border_color(theme.border)
+                    .flex()
+                    .flex_col()
+                    .gap_3()
+                    .p_3()
+                    .child(
+                        div().flex().items_center().justify_between()
+                            .child(div().font_bold().child("Tasks"))
+                            .child(Badge::new().count(tasks.len())),
+                    )
+                    .child(
+                        div().flex().gap_1().flex_wrap().children(
+                            [
+                                (tasks::TaskFilter::Today, "Today"),
+                                (tasks::TaskFilter::Upcoming, "Next"),
+                                (tasks::TaskFilter::Completed, "Done"),
+                                (tasks::TaskFilter::All, "All"),
+                            ].into_iter().map(|(mode, label)| {
+                                Button::new(format!("task-filter-{label}"))
+                                    .label(label)
+                                    .when(filter == mode, |button| button.primary())
+                                    .on_click(cx.listener(move |this, _, _, cx| this.choose_task_filter(mode, cx)))
+                                    .into_any_element()
+                            }),
+                        ),
+                    )
+                    .child(
+                        div().id("task-review-list").flex_1().overflow_y_scroll()
+                            .flex().flex_col().gap_2()
+                            .when(tasks.is_empty(), |view| view.child(
+                                div().rounded_lg().p_3().bg(theme.secondary).text_sm()
+                                    .text_color(theme.muted_foreground)
+                                    .child("All clear here. Add a task or switch views."),
+                            ))
+                            .children(tasks.into_iter().map(|task| {
+                                let id = task.id;
+                                let chosen = selected == Some(id);
+                                let label = format!(
+                                    "{}{}",
+                                    if task.completed_at.is_some() { "✓ " } else { "" },
+                                    task.title,
+                                );
+                                div().flex().flex_col().gap_1().p_2()
+                                    .rounded_lg().border_1()
+                                    .border_color(if chosen { theme.foreground } else { theme.border })
+                                    .bg(if chosen { theme.sidebar_accent } else { theme.background })
+                                    .child(
+                                        Button::new(format!("task-select-{id}")).label(label)
+                                            .on_click(cx.listener(move |this, _, _, cx| this.select_task(id, cx))),
+                                    )
+                                    .child(div().px_2().text_xs().text_color(theme.muted_foreground)
+                                        .child(if task.completed_at.is_some() {
+                                            "Completed".into()
+                                        } else {
+                                            tasks::local_due_label(task.due_at)
+                                        }))
+                            })),
+                    )
+                    .child(
+                        div().border_t_1().border_color(theme.border).pt_3()
+                            .child(div().text_xs().text_color(theme.muted_foreground)
+                                .child("Tasks stay in your local SQLite database.")),
+                    ),
+            )
+            .child(
+                div().flex_1().min_w_0().flex().flex_col().gap_3()
+                    .child(
+                        div().rounded_xl().border_1().border_color(theme.border)
+                            .bg(rgb(0xffffff)).p_4().flex().flex_col().gap_3()
+                            .child(
+                                div().flex().items_center().justify_between()
+                                    .child(div().font_bold().child("Task details"))
+                                    .child(
+                                        Badge::new().dot().color(
+                                            if details.as_ref().is_some_and(|task| task.completed_at.is_some()) {
+                                                theme.success
+                                            } else {
+                                                theme.muted_foreground
+                                            },
+                                        ),
+                                    ),
+                            )
+                            .child(
+                                if let Some(task) = details {
+                                    let done = task.completed_at.is_some();
+                                    let id = task.id;
+                                    div().flex().flex_col().gap_3()
+                                        .child(div().text_lg().font_bold().child(task.title))
+                                        .child(
+                                            div().bg(theme.secondary).rounded_lg().p_3()
+                                                .flex().flex_col().gap_1()
+                                                .child(div().text_xs().text_color(theme.muted_foreground).child("DUE"))
+                                                .child(div().font_bold().child(tasks::local_due_label(task.due_at))),
+                                        )
+                                        .child(
+                                            div().flex().gap_2().flex_wrap()
+                                                .child(
+                                                    Button::new(format!("task-toggle-{id}"))
+                                                        .primary().label(if done { "Reopen task" } else { "Mark complete" })
+                                                        .on_click(cx.listener(move |this, _, _, cx| this.complete_task(id, !done, cx))),
+                                                )
+                                                .when(!done, |view| view.child(
+                                                    Button::new(format!("task-due-{id}")).label("Update reminder")
+                                                        .on_click(cx.listener(move |this, _, _, cx| this.reschedule_task(id, cx))),
+                                                )),
+                                        )
+                                        .into_any_element()
+                                } else {
+                                    div().bg(theme.secondary).rounded_lg().p_4()
+                                        .text_sm().text_color(theme.muted_foreground)
+                                        .child("Select a task on the left to see its details and finish it.")
+                                        .into_any_element()
+                                },
+                            ),
+                    )
+                    .child(
+                        div().rounded_xl().border_1().border_color(theme.border)
+                            .bg(rgb(0xffffff)).p_4().flex().flex_col().gap_3()
+                            .child(div().font_bold().child("Add a new task"))
+                            .child(div().text_xs().text_color(theme.muted_foreground)
+                                .child("A quick place to capture what needs doing."))
+                            .child(Input::new(&self.task_title).aria_label("Task description"))
+                            .child(div().text_xs().text_color(theme.muted_foreground)
+                                .child("Optional reminder · YYYY-MM-DD HH:MM"))
+                            .child(Input::new(&self.task_due).aria_label("Local due date and time"))
+                            .child(
+                                div().flex().gap_2().flex_wrap()
+                                    .child(Button::new("task-tomorrow").label("Tomorrow at 9")
+                                        .on_click(cx.listener(|this, _, window, cx| this.preset_tomorrow(window, cx))))
+                                    .child(Button::new("task-no-reminder").label("Clear date")
+                                        .on_click(cx.listener(|this, _, window, cx| this.clear_due(window, cx))))
+                                    .child(Button::new("task-add").primary().label("Add task")
+                                        .on_click(cx.listener(|this, _, window, cx| this.add_task(window, cx)))),
+                            ),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    fn overview(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = cx.theme().clone();
+        div().flex().flex_col().gap_4()
+            .child(
+                div().rounded_xl().bg(rgb(0xededeb)).p_5()
+                    .flex().items_center().justify_between().gap_4()
+                    .child(
+                        div().flex_1().min_w_0().flex().flex_col().gap_2()
+                            .child(div().text_xs().font_bold().text_color(theme.muted_foreground)
+                                .child("YOUR EVERYDAY WORKSPACE"))
+                            .child(div().text_xl().font_bold().child("Make room for what matters."))
+                            .child(div().text_sm().text_color(theme.muted_foreground)
+                                .child("Capture ideas, keep track of tasks, and move between tools without breaking focus."))
+                            .child(
+                                div().flex().gap_2().pt_2()
+                                    .child(Button::new("home-new-note").primary().label("New quick note")
+                                        .on_click(cx.listener(|this, _, _, cx| this.open_quick(cx))))
+                                    .child(Button::new("home-new-task").label("Open tasks")
+                                        .on_click(cx.listener(|this, _, _, cx| this.navigate(Page::Tasks, cx)))),
+                            ),
+                    )
+                    .child(
+                        div().size(px(94.)).flex_shrink_0().rounded_xl()
+                            .bg(rgb(0xe0e7db)).flex().items_center().justify_center()
+                            .child(div().text_color(rgb(0x65846b)).text_3xl().child("✦")),
+                    ),
+            )
+            .child(
+                div().flex().gap_3()
+                    .child(
+                        div().flex_1().min_w_0().rounded_xl().bg(rgb(0xffffff))
+                            .border_1().border_color(theme.border).p_4()
+                            .flex().flex_col().gap_2()
+                            .child(div().text_xs().text_color(theme.muted_foreground).child("SAVED NOTES"))
+                            .child(div().text_xl().font_bold().child(format!("{}", self.notes.len())))
+                            .child(div().text_xs().text_color(theme.muted_foreground).child("Ideas in your library")),
+                    )
+                    .child(
+                        div().flex_1().min_w_0().rounded_xl().bg(rgb(0xffffff))
+                            .border_1().border_color(theme.border).p_4()
+                            .flex().flex_col().gap_2()
+                            .child(div().text_xs().text_color(theme.muted_foreground).child("QUICK TASKS"))
+                            .child(div().text_xl().font_bold().child("Today"))
+                            .child(div().text_xs().text_color(theme.muted_foreground).child("See what needs doing")),
+                    )
+                    .child(
+                        div().flex_1().min_w_0().rounded_xl().bg(rgb(0xffffff))
+                            .border_1().border_color(theme.border).p_4()
+                            .flex().flex_col().gap_2()
+                            .child(div().text_xs().text_color(theme.muted_foreground).child("PHONE CONNECTION"))
+                            .child(div().text_lg().font_bold().child(
+                                if receiver_online() { "Ready" } else { "Offline" }
+                            ))
+                            .child(div().text_xs().text_color(theme.muted_foreground).child("Snap to Paste Image")),
+                    ),
+            )
+            .child(
+                div().flex().items_center().justify_between()
+                    .child(div().font_bold().child("Quick actions"))
+                    .child(div().text_xs().text_color(theme.muted_foreground)
+                        .child("All the little things, in one place")),
+            )
+            .child(
+                div().flex().flex_col().gap_2()
+                    .child(self.tool_card("Prompt Notes", "Compose a prompt and paste to your previous app.",
+                        "Ctrl+Alt+P", IconName::FileText,
+                        Button::new("home-prompt").label("Open")
+                            .on_click(cx.listener(|this, _, _, cx| this.open_prompt(cx))), cx))
+                    .child(self.tool_card("Saved Notes", "Find and edit your local notes.",
+                        "SQLite + search", IconName::FolderOpen,
+                        Button::new("home-notes").label("Browse")
+                            .on_click(cx.listener(|this, _, _, cx| this.navigate(Page::Saved, cx))), cx))
+                    .child(self.tool_card("Quick Launcher", "Search notes, tasks and actions instantly.",
+                        "Ctrl+Shift+Space", IconName::LayoutDashboard,
+                        Button::new("home-launcher").label("Search")
+                            .on_click(|_,_,_| crate::ui_bridge::request_launcher()), cx)),
+            )
+            .into_any_element()
+    }
+
     fn page_content(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.theme().clone();
         match self.page {
-            Page::Home => {
-                div().flex().flex_col().gap_3()
-                    .child(div().flex().justify_between().items_center()
-                        .child(div().text_sm().text_color(theme.muted_foreground).child("Available tools"))
-                        .child(Badge::new().count(4)))
-                    .child(self.tool_card("Snap to Paste Image",
-                        "Capture a photo on iPhone and paste it into the active AI prompt.", "iPhone → Windows",
-                        IconName::FileText,
-                        Button::new("home-pair").primary().label("Pair iPhone")
-                            .on_click(cx.listener(|this, _, _, cx| this.show_pairing(cx))), cx))
-                    .child(self.tool_card("Prompt Notes",
-                            "Prepare long prompts before pasting.", "Ctrl+Alt+P",
-                            IconName::FileText,
-                            Button::new("home-prompt").label("Open Prompt Notes")
-                                .on_click(cx.listener(|this, _, _, cx| this.open_prompt(cx))), cx))
-                    .child(self.tool_card("Quick Note",
-                            "Save ideas without copying or pasting.", "Ctrl+Alt+N",
-                            IconName::FileText,
-                            Button::new("home-quick").label("Write a note")
-                                .on_click(cx.listener(|this, _, _, cx| this.open_quick(cx))), cx))
-                    .child(div().p_4().rounded_xl().border_1().border_color(theme.border)
-                        .flex().items_center().justify_between()
-                        .child(div().flex().flex_col().gap_1()
-                            .child(div().font_bold().child("Your saved notes"))
-                            .child(div().text_sm().text_color(theme.muted_foreground)
-                                .child(format!("{} local notes, never uploaded", self.notes.len()))))
-                        .child(Button::new("home-saved").label("Browse notes")
-                            .on_click(cx.listener(|this, _, _, cx| this.navigate(Page::Saved, cx)))))
-                    .child(Button::new("home-launcher").label("Quick Launcher · Ctrl+Shift+Space")
-                        .on_click(|_,_,_| crate::ui_bridge::request_launcher()))
-                    .child(div().p_4().rounded_xl().border_1().border_color(theme.border)
-                        .flex().items_center().justify_between()
-                        .child(div().flex().flex_col().gap_1()
-                            .child(div().font_bold().child("Quick Tasks & reminders"))
-                            .child(div().text_sm().text_color(theme.muted_foreground)
-                                .child("Today's tasks, upcoming deadlines, and completed work")))
-                        .child(Button::new("home-tasks").label("Open tasks")
-                            .on_click(cx.listener(|this, _, _, cx| this.navigate(Page::Tasks, cx)))))
-                    .into_any_element()
-            }
+            Page::Home => self.overview(cx),
             Page::Photo => div().flex().flex_col().gap_3()
                 .child(self.tool_card("Snap to Paste Image",
                     "Your iPhone pairs to this Windows receiver. Focus an AI prompt, then capture an image on your phone.",
@@ -669,8 +1023,8 @@ impl Hub {
                             .child("Search note titles, text, or tags"))
                         .child(Input::new(&self.search).aria_label("Search saved notes by keywords, body, or tags")))
                     .child(div().flex().gap_3().min_h(px(300.))
-                        .child(div().w(px(208.)).flex_shrink_0().rounded_lg().border_1()
-                            .border_color(theme.border).p_3().gap_2().flex().flex_col()
+                        .child(div().w(px(248.)).flex_shrink_0().rounded_xl().border_1()
+                            .border_color(theme.border).bg(rgb(0xffffff)).p_3().gap_2().flex().flex_col()
                             .child(div().text_sm().font_bold().child("Saved notes"))
                             .child(div().id("saved-notes-scroll").flex_1().overflow_y_scroll()
                                 .gap_2().flex().flex_col()
@@ -687,8 +1041,8 @@ impl Hub {
                                         .on_click(cx.listener(move |this, _, window, cx| this.pick_note(id, window, cx)))
                                         .into_any_element()
                                 }))))
-                        .child(div().flex_1().min_w_0().rounded_lg().border_1()
-                            .border_color(theme.border).p_3().flex().flex_col().gap_3()
+                        .child(div().flex_1().min_w_0().rounded_xl().border_1()
+                            .border_color(theme.border).bg(rgb(0xffffff)).p_4().flex().flex_col().gap_3()
                             .child(div().font_bold().child("Edit note"))
                             .when(selected.is_none(), |this| this.child(
                                 div().text_sm().text_color(theme.muted_foreground)
@@ -711,68 +1065,7 @@ impl Hub {
                         ))
                     .into_any_element()
             }
-            Page::Tasks => {
-                let items = self.task_items.clone();
-                let filter = self.task_filter;
-                div().flex().flex_col().gap_3()
-                    .child(div().text_sm().font_bold().child("Capture a task"))
-                    .child(div().text_xs().text_color(theme.muted_foreground)
-                        .child("What do you need to do?"))
-                    .child(Input::new(&self.task_title).aria_label("Task description"))
-                    .child(div().text_xs().text_color(theme.muted_foreground)
-                        .child("Optional reminder: YYYY-MM-DD HH:MM (your local time). Leave blank for no reminder."))
-                    .child(Input::new(&self.task_due).aria_label("Optional task reminder date and time"))
-                    .child(div().flex().gap_2().flex_wrap().items_center()
-                        .child(Button::new("task-tomorrow").label("Tomorrow 9 AM")
-                            .on_click(cx.listener(|this, _, window, cx| this.preset_tomorrow(window, cx))))
-                        .child(Button::new("task-no-reminder").label("No reminder")
-                            .on_click(cx.listener(|this, _, window, cx| this.clear_due(window, cx))))
-                        .child(Button::new("task-add").primary().label("Add task")
-                            .on_click(cx.listener(|this, _, window, cx| this.add_task(window, cx)))))
-                    .child(div().flex().items_center().justify_between().gap_2()
-                        .child(div().text_sm().font_bold().child("Your tasks"))
-                        .child(Button::new("tasks-refresh").label("Refresh")
-                            .on_click(cx.listener(|this, _, _, cx| { this.refresh_tasks(); cx.notify(); }))))
-                    .child(div().flex().gap_2().flex_wrap()
-                        .children([
-                            (tasks::TaskFilter::Today, "Today"),
-                            (tasks::TaskFilter::Upcoming, "Upcoming"),
-                            (tasks::TaskFilter::Completed, "Completed"),
-                            (tasks::TaskFilter::All, "All"),
-                        ].into_iter().map(|(mode,label)| {
-                            Button::new(format!("tasks-filter-{label}")).label(label)
-                                .when(filter==mode, |b| b.primary())
-                                .on_click(cx.listener(move |this, _, _, cx| this.choose_task_filter(mode,cx)))
-                                .into_any_element()
-                        })))
-                    .when(items.is_empty(), |this| this.child(
-                        div().p_4().rounded_lg().border_1().border_color(theme.border)
-                            .text_sm().text_color(theme.muted_foreground)
-                            .child("No tasks in this view. Add one above to get started.")
-                    ))
-                    .children(items.into_iter().map(|task| {
-                        let id=task.id;
-                        let done=task.completed_at.is_some();
-                        let due=tasks::local_due_label(task.due_at);
-                        let overdue=!done && task.due_at.is_some_and(|time| time <= tasks::now_ms());
-                        div().p_3().rounded_lg().border_1().border_color(theme.border)
-                            .flex().items_center().justify_between().gap_2()
-                            .child(div().flex_1().min_w_0().flex().flex_col().gap_1()
-                                .child(div().font_bold().child(task.title))
-                                .child(div().text_xs().text_color(theme.muted_foreground)
-                                    .child(if done { "Completed".into() } else if overdue {
-                                        format!("Overdue · {due}")
-                                    } else { due })))
-                            .child(Button::new(format!("task-done-{id}"))
-                                .label(if done { "Reopen" } else { "Done" })
-                                .on_click(cx.listener(move |this, _, _, cx| this.complete_task(id,!done,cx))))
-                            .when(!done, |this| this.child(
-                                Button::new(format!("task-reschedule-{id}")).label("Set due")
-                                    .on_click(cx.listener(move |this, _, _, cx| this.reschedule_task(id,cx)))
-                            ))
-                    }))
-                    .into_any_element()
-            }
+            Page::Tasks => self.task_workspace(cx),
             Page::Settings => div().flex().flex_col().gap_4()
                 .child(div().p_5().rounded_xl().border_1().border_color(theme.border)
                     .flex().flex_col().gap_3()
@@ -802,62 +1095,90 @@ impl Render for Hub {
         let content = self.page_content(cx);
         div()
             .size_full()
-            .flex()
+            .relative()
             .bg(theme.background)
             .text_color(theme.foreground)
-            .child(sidebar)
             .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .flex()
-                    .flex_col()
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .px_5()
-                            .py_3()
-                            .border_b_1()
-                            .border_color(theme.border)
-                            .child(
-                                div()
-                                    .flex()
-                                    .flex_col()
-                                    .gap_1()
-                                    .child(div().text_xl().font_bold().child(self.page.heading()))
-                                    .child(
-                                        div()
-                                            .text_sm()
-                                            .text_color(theme.muted_foreground)
-                                            .child(self.page.subtitle()),
-                                    ),
-                            )
-                            .child(Badge::new().dot().color(if receiver_online() {
-                                theme.success
-                            } else {
-                                theme.muted_foreground
-                            })),
-                    )
-                    .child(
-                        div()
-                            .id("my-tools-main-scroll")
-                            .flex_1()
-                            .overflow_y_scroll()
-                            .p_4()
-                            .child(content),
-                    )
-                    .child(
-                        div()
-                            .px_4()
-                            .py_3()
-                            .border_t_1()
-                            .border_color(theme.border)
-                            .text_xs()
-                            .text_color(theme.muted_foreground)
-                            .child(self.status.clone()),
-                    ),
+                div().size_full().flex().child(sidebar).child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .flex()
+                        .flex_col()
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .justify_between()
+                                .px_5()
+                                .py_3()
+                                .bg(rgb(0xffffff))
+                                .border_b_1()
+                                .border_color(theme.border)
+                                .child(
+                                    div()
+                                        .flex()
+                                        .flex_col()
+                                        .gap_1()
+                                        .child(
+                                            div().text_xl().font_bold().child(self.page.heading()),
+                                        )
+                                        .child(
+                                            div()
+                                                .text_sm()
+                                                .text_color(theme.muted_foreground)
+                                                .child(self.page.subtitle()),
+                                        ),
+                                )
+                                .child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap_2()
+                                        .child(
+                                            Button::new("top-launcher")
+                                                .label("Search tools")
+                                                .on_click(|_, _, _| {
+                                                    crate::ui_bridge::request_launcher()
+                                                }),
+                                        )
+                                        .child(
+                                            Button::new("top-note")
+                                                .primary()
+                                                .label("+ Note")
+                                                .on_click(cx.listener(|this, _, _, cx| {
+                                                    this.open_quick(cx)
+                                                })),
+                                        )
+                                        .child(Badge::new().dot().color(if receiver_online() {
+                                            theme.success
+                                        } else {
+                                            theme.muted_foreground
+                                        })),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .id("my-tools-main-scroll")
+                                .flex_1()
+                                .overflow_y_scroll()
+                                .p_4()
+                                .child(content),
+                        )
+                        .child(
+                            div()
+                                .px_4()
+                                .py_3()
+                                .border_t_1()
+                                .border_color(theme.border)
+                                .text_xs()
+                                .text_color(theme.muted_foreground)
+                                .child(self.status.clone()),
+                        ),
+                ),
             )
+            .when(self.day_complete && self.page == Page::Tasks, |root| {
+                root.child(self.completion_dialog(cx))
+            })
     }
 }
